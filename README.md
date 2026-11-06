@@ -22,7 +22,7 @@ Start pi in a Git repository and open the reviewer:
 /diff-review
 ```
 
-The command returns immediately; it does not replace pi's editor. Running `/diff-review` again brings the existing review window forward.
+The command returns immediately; it does not replace pi's editor. Running `/diff-review` again brings the existing review window forward. Close the window with the `×` button in the header.
 
 ## Review workflow
 

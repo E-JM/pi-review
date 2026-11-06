@@ -43,6 +43,7 @@ const repoMetaEl = byId("repo-meta");
 const checkpointButton = byId<HTMLButtonElement>("mode-checkpoint");
 const headButton = byId<HTMLButtonElement>("mode-head");
 const submitButton = byId<HTMLButtonElement>("submit-review");
+const closeButton = byId<HTMLButtonElement>("close-window");
 const searchInput = byId<HTMLInputElement>("search");
 const recentCountEl = byId("recent-count");
 const fileCountEl = byId("file-count");
@@ -407,8 +408,11 @@ function renderTree(): void {
 function updateSubmitButton(): void {
   const count = workspace?.pendingFiles.length ?? 0;
   const commentCount = comments.filter((comment) => comment.body.trim().length > 0).length;
-  submitButton.disabled = count === 0 && commentCount === 0;
-  if (commentCount > 0) submitButton.textContent = `Submit ${commentCount} comment${commentCount === 1 ? "" : "s"} · review ${count}`;
+  // A half-typed draft counts too, so the submit button is live while typing.
+  const draftCount = draft != null && draftInput.value.trim().length > 0 ? 1 : 0;
+  submitButton.disabled = count === 0 && commentCount === 0 && draftCount === 0;
+  const total = commentCount + draftCount;
+  if (total > 0) submitButton.textContent = `Submit ${total} comment${total === 1 ? "" : "s"} · review ${count}`;
   else if (count > 0) submitButton.textContent = `Mark ${count} reviewed`;
   else submitButton.textContent = "Mark reviewed";
 }
@@ -576,6 +580,13 @@ function addDraft(): void {
   renderFeedback();
   renderRecent();
   renderTree();
+  updateSubmitButton();
+}
+
+function cancelDraft(): void {
+  draft = null;
+  draftInput.value = "";
+  renderFeedback();
   updateSubmitButton();
 }
 
@@ -764,27 +775,26 @@ lineWrapButton.addEventListener("click", () => {
 });
 fileCommentButton.addEventListener("click", openFileDraft);
 addCommentButton.addEventListener("click", addDraft);
-cancelDraftButton.addEventListener("click", () => {
-  draft = null;
-  draftInput.value = "";
-  renderFeedback();
-});
+cancelDraftButton.addEventListener("click", cancelDraft);
+draftInput.addEventListener("input", () => updateSubmitButton());
 draftInput.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
     event.preventDefault();
     addDraft();
   }
-  if (event.key === "Escape") {
-    draft = null;
-    renderFeedback();
-  }
+  if (event.key === "Escape") cancelDraft();
 });
 submitButton.addEventListener("click", () => {
   if (submitButton.disabled) return;
+  // Commit any in-progress note so it is not silently dropped on submit.
+  addDraft();
   submitButton.disabled = true;
   submitButton.textContent = "Saving…";
   send({ type: "submit-review", comments });
   window.setTimeout(() => updateSubmitButton(), 5000);
+});
+closeButton.addEventListener("click", () => {
+  send({ type: "close-window" });
 });
 window.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {

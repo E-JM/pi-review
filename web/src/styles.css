@@ -82,6 +82,8 @@ button { color: inherit; }
 .quiet:disabled { opacity: .35; cursor: default; }
 .icon-button { border-color: transparent; background: transparent; color: var(--muted); font-size: 18px; line-height: 18px; }
 .icon-button:hover { color: var(--text); }
+.icon-button.close { margin-left: 4px; }
+.icon-button.close:hover { color: var(--red); }
 
 .workspace { display: flex; height: calc(100% - 48px); min-height: 0; }
 .sidebar {

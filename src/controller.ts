@@ -5,7 +5,7 @@ import { open, type GlimpseWindow } from "glimpseui";
 import { createCheckpoint, getRepoRoot } from "./git.js";
 import { composeFeedback } from "./prompt.js";
 import type { HostMessage, ReviewCheckpoint, WindowMessage } from "./types.js";
-import { loadReviewHtml } from "./ui.js";
+import { loadReviewHtml, reviewHtmlPath } from "./ui.js";
 import { WorkspaceModel } from "./workspace.js";
 
 export const CHECKPOINT_ENTRY = "review-loop/checkpoint";
@@ -65,8 +65,24 @@ export class ReviewController {
     await this.model.refresh();
     await this.startWatcher();
 
-    const window = open(loadReviewHtml(), { width: 1480, height: 920, title: "Review Loop" });
+    // The Linux Chromium backend loads inline HTML by navigating to a data:
+    // URL, which cannot carry this app's multi-megabyte bundle — load the
+    // self-contained index.html from disk there instead.
+    const fromDisk = process.platform === "linux";
+    // Empty html keeps glimpseui's first "ready" event flowing to us, where
+    // the content is loaded via loadFile (see below).
+    const window = open(fromDisk ? "" : loadReviewHtml(), { width: 1480, height: 920, title: "Review Loop" });
     this.window = window;
+    if (fromDisk) {
+      let htmlLoaded = false;
+      window.on("ready", () => {
+        // Ready fires again after each navigation; only load once, and only
+        // while this window is still the live one.
+        if (htmlLoaded || this.window !== window) return;
+        htmlLoaded = true;
+        window.loadFile(reviewHtmlPath());
+      });
+    }
     window.on("message", (value) => {
       const message = parseMessage(value);
       if (message != null) void this.handleMessage(message, ctx);
@@ -128,6 +144,10 @@ export class ReviewController {
   }
 
   private async handleMessage(message: WindowMessage, ctx: ExtensionCommandContext): Promise<void> {
+    if (message.type === "close-window") {
+      await this.close();
+      return;
+    }
     if (this.model == null) return;
     if (message.type === "ready") {
       this.send({ type: "workspace", state: this.model.state() });
@@ -158,7 +178,17 @@ export class ReviewController {
         this.pi.appendEntry<ReviewCheckpoint>(CHECKPOINT_ENTRY, checkpoint);
         this.model.setCheckpoint(checkpoint);
         const state = await this.model.refresh();
-        if (feedback) ctx.ui.pasteToEditor(feedback);
+        if (feedback) {
+          // pasteToEditor goes through the terminal paste machinery, which is
+          // unreliable when the editor already has content; append explicitly
+          // instead so feedback always lands next to whatever is already there.
+          try {
+            const existing = ctx.ui.getEditorText?.() ?? "";
+            ctx.ui.setEditorText(existing ? `${existing}\n\n${feedback}` : feedback);
+          } catch {
+            ctx.ui.pasteToEditor(feedback);
+          }
+        }
         this.send({ type: "workspace", state });
         this.send({ type: "review-submitted", checkpointAt: checkpoint.createdAt, insertedFeedback: feedback.length > 0 });
         ctx.ui.notify(feedback ? "Review checkpoint saved; feedback inserted into the editor." : "Review checkpoint saved.", "info");
