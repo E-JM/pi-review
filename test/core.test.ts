@@ -41,8 +41,6 @@ test("formats compact actionable feedback", () => {
     { path: "src/a.ts", side: "modified", line: 12, body: "Handle the empty case." },
     { path: "README.md", side: "file", line: null, body: "Clarify setup.\nAdd an example." },
   ]), [
-    "Please address the following review feedback:",
-    "",
     "1. src/a.ts:12 (current)",
     "   Handle the empty case.",
     "",

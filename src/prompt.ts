@@ -12,7 +12,7 @@ export function composeFeedback(comments: ReviewComment[]): string {
   const valid = comments.filter((comment) => comment.body.trim().length > 0);
   if (valid.length === 0) return "";
 
-  const lines = ["Please address the following review feedback:", ""];
+  const lines: string[] = [];
   valid.forEach((comment, index) => {
     lines.push(`${index + 1}. ${location(comment)}`);
     lines.push(`   ${comment.body.trim().replace(/\n/g, "\n   ")}`);
