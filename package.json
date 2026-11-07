@@ -1,10 +1,10 @@
 {
-  "name": "pi-review-loop",
+  "name": "pi-review",
   "version": "0.3.0",
   "description": "A persistent incremental diff review loop for pi",
   "type": "module",
   "license": "MIT",
-  "repository": "github:earendil-works/pi-review-loop",
+  "repository": "github:E-JM/pi-review",
   "files": [
     "src",
     "web/dist",

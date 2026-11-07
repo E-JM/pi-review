@@ -16,7 +16,7 @@ import { ReviewController } from "./controller.js";
 // somewhere else, and GLIMPSE_BACKEND=native. A leftover GLIMPSE_BACKEND=chromium
 // (e.g. from earlier debugging) still uses the launcher — it is the same
 // backend, just spawned with a real Node executable.
-const launcherPath = join(tmpdir(), "pi-review-loop-glimpse-backend.mjs");
+const launcherPath = join(tmpdir(), "pi-review-glimpse-backend.mjs");
 
 function prepareLinuxGlimpseBackend(): void {
   if (process.platform !== "linux") return;

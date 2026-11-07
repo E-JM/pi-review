@@ -7,7 +7,7 @@ Review Loop keeps a native review window open while the agent works. Submitting 
 ## Install
 
 ```sh
-pi install git:github.com/earendil-works/pi-review-loop
+pi install git:github.com/E-JM/pi-review
 ```
 
 Update an existing installation with:
@@ -123,8 +123,8 @@ The bundled review window includes [jsdiff](https://github.com/jsdiff/jsdiff) (`
 ## Development
 
 ```sh
-git clone https://github.com/earendil-works/pi-review-loop
-cd pi-review-loop
+git clone https://github.com/E-JM/pi-review
+cd pi-review
 npm install
 npm run build
 npm test
@@ -135,7 +135,7 @@ When testing from a sibling repository, load the package directory directly:
 
 ```sh
 cd ~/workspaces/some-project
-pi -e ../pi-review-loop
+pi -e ../pi-review
 ```
 
 After changing `web/src`, run `npm run build:web`; the extension serves the generated self-contained `web/dist/index.html`.
