@@ -14,6 +14,8 @@ import "monaco-editor/languages/definitions/shell/register.js";
 import "monaco-editor/languages/definitions/typescript/register.js";
 import "monaco-editor/languages/definitions/yaml/register.js";
 import type { ChangedFile, FileContents, HostMessage, ReviewComment, ReviewMode, WorkspaceState } from "../../src/types.js";
+import { UnifiedDiffView } from "./unified.js";
+import { commentSideLabel, captureFocusedComment, createInlineCommentElement, restoreFocusedComment, type UiComment } from "./comment.js";
 
 declare global {
   interface Window {
@@ -55,6 +57,9 @@ const lineWrapButton = byId<HTMLButtonElement>("line-wrap");
 const fileCommentButton = byId<HTMLButtonElement>("file-comment");
 const emptyStateEl = byId("empty-state");
 const editorEl = byId("editor");
+const unifiedEl = byId("unified");
+const viewUnifiedButton = byId<HTMLButtonElement>("view-unified");
+const viewSplitButton = byId<HTMLButtonElement>("view-split");
 const feedbackPanelEl = byId("feedback-panel");
 const feedbackTitleEl = byId("feedback-title");
 const commentListEl = byId("comment-list");
@@ -73,7 +78,6 @@ let mountedMode: ReviewMode | null = null;
 const scrollPositions = new Map<string, ScrollPosition>();
 let activeRequestId = "";
 let requestCounter = 0;
-interface UiComment extends ReviewComment { id: string }
 interface ActiveViewZone { id: string; editor: monaco.editor.ICodeEditor; domNode: HTMLElement }
 interface ScrollPosition {
   originalTop: number;
@@ -89,6 +93,29 @@ let pendingOpenPath: string | null = null;
 let toastTimer = 0;
 let readyTimer = 0;
 const collapsedDirs = new Set<string>();
+
+type ViewStyle = "unified" | "split";
+const VIEW_STYLE_KEY = "review-loop:view";
+
+function loadViewStyle(): ViewStyle {
+  try {
+    return localStorage.getItem(VIEW_STYLE_KEY) === "unified" ? "unified" : "split";
+  } catch {
+    return "split";
+  }
+}
+
+let viewStyle: ViewStyle = loadViewStyle();
+let lastFile: FileContents | null = null;
+const unifiedScrollTops = new Map<string, number>();
+
+function persistViewStyle(): void {
+  try {
+    localStorage.setItem(VIEW_STYLE_KEY, viewStyle);
+  } catch {
+    // Restricted webview storage: view style just stays session-local.
+  }
+}
 
 monaco.editor.defineTheme("review-loop", {
   base: "vs-dark",
@@ -148,6 +175,13 @@ let modifiedModel: monaco.editor.ITextModel | null = null;
 let originalDecorations: string[] = [];
 let modifiedDecorations: string[] = [];
 
+const unifiedView = new UnifiedDiffView(unifiedEl, {
+  addComment: (side, line) => addInlineComment(side, line),
+  deleteComment: (id) => removeComment(id),
+  onCommentInput: () => updateSubmitButton(),
+  showToast: showToast,
+});
+
 function send(message: unknown): void {
   window.glimpse?.send(message);
 }
@@ -199,7 +233,16 @@ function scrollKey(path: string, mode: ReviewMode): string {
 }
 
 function saveMountedScroll(): void {
-  if (mountedPath == null || mountedMode == null || originalModel == null || modifiedModel == null) return;
+  if (mountedPath == null || mountedMode == null) return;
+  if (viewStyle === "unified") {
+    // The unified DOM may still show a previous file while mountedPath has
+    // already moved (view-toggle window) — never save that offset for the
+    // new file.
+    if (!unifiedView.isShowing(mountedPath, mountedMode)) return;
+    unifiedScrollTops.set(scrollKey(mountedPath, mountedMode), unifiedView.saveScroll());
+    return;
+  }
+  if (originalModel == null || modifiedModel == null) return;
   const originalEditor = diffEditor.getOriginalEditor();
   const modifiedEditor = diffEditor.getModifiedEditor();
   scrollPositions.set(scrollKey(mountedPath, mountedMode), {
@@ -439,6 +482,10 @@ function renderFilebar(): void {
   filePathEl.textContent = file?.path ?? "No changes to review";
   lineWrapButton.disabled = file == null;
   fileCommentButton.disabled = file == null;
+  viewUnifiedButton.classList.toggle("active", viewStyle === "unified");
+  viewSplitButton.classList.toggle("active", viewStyle === "split");
+  viewUnifiedButton.disabled = file == null;
+  viewSplitButton.disabled = file == null;
 }
 
 function render(): void {
@@ -451,8 +498,12 @@ function render(): void {
 
   const file = activeFile();
   emptyStateEl.classList.toggle("hidden", file != null);
-  editorEl.classList.toggle("hidden", file == null);
-  if (file == null) disposeModels();
+  editorEl.classList.toggle("hidden", file == null || viewStyle !== "split");
+  unifiedEl.classList.toggle("hidden", file == null || viewStyle !== "unified");
+  if (file == null) {
+    disposeModels();
+    unifiedView.clear();
+  }
   renderFeedback();
 }
 
@@ -493,19 +544,41 @@ function disposeModels(): void {
 
 function mountFile(file: FileContents): void {
   if (file.path !== activePath || workspace?.mode !== file.mode) return;
+  // Capture focus before either view's DOM is torn down: the agent editing
+  // the active file must not cost a composing reviewer their caret.
+  const focused = captureFocusedComment();
+  // Unconditional: models, when they exist, must always belong to the file
+  // that is mounted — including when the previous mount was for another file.
   disposeModels();
+  lastFile = file;
+  mountedFingerprint = file.fingerprint;
+  mountedPath = file.path;
+  mountedMode = file.mode;
+  if (viewStyle === "unified") {
+    unifiedView.mount(file, lineComments(), lineWrapEnabled(), inferLanguage(file.path));
+    unifiedView.restoreScrollTop(unifiedScrollTops.get(scrollKey(file.path, file.mode)) ?? 0);
+    restoreFocusedComment(focused);
+    return;
+  }
   const language = inferLanguage(file.path);
   originalModel = monaco.editor.createModel(file.originalContent, language);
   modifiedModel = monaco.editor.createModel(file.modifiedContent, language);
   diffEditor.setModel({ original: originalModel, modified: modifiedModel });
-  mountedFingerprint = file.fingerprint;
-  mountedPath = file.path;
-  mountedMode = file.mode;
   syncInlineComments();
+  restoreFocusedComment(focused);
   requestAnimationFrame(() => {
     restoreScroll(file.path, file.mode);
     setTimeout(() => restoreScroll(file.path, file.mode), 30);
   });
+}
+
+function lineComments(): UiComment[] {
+  if (activePath == null || workspace == null) return [];
+  return comments.filter((comment) => comment.path === activePath && comment.mode === workspace!.mode && comment.side !== "file" && comment.line != null);
+}
+
+function lineWrapEnabled(): boolean {
+  return lineWrapButton.getAttribute("aria-pressed") === "true";
 }
 
 function requestActiveFile(): void {
@@ -513,11 +586,6 @@ function requestActiveFile(): void {
   if (file == null || file.fingerprint === mountedFingerprint) return;
   activeRequestId = `file:${++requestCounter}`;
   send({ type: "request-file", requestId: activeRequestId, path: file.path, mode: workspace!.mode });
-}
-
-function commentSideLabel(comment: ReviewComment): string {
-  if (comment.side === "modified") return "Current";
-  return comment.mode === "head" ? "HEAD" : "Reviewed";
 }
 
 function commentLocation(comment: ReviewComment): string {
@@ -611,44 +679,26 @@ function sizeInlineComment(container: HTMLElement, editor: monaco.editor.ICodeEd
 }
 
 function inlineCommentElement(comment: UiComment, editor: monaco.editor.ICodeEditor): HTMLElement {
-  const container = document.createElement("div");
-  container.className = "inline-comment";
+  const container = createInlineCommentElement(comment, {
+    onInput: () => updateSubmitButton(),
+    onDelete: () => removeComment(comment.id),
+  });
   sizeInlineComment(container, editor);
-  const header = document.createElement("div");
-  header.className = "inline-comment-header";
-  const title = document.createElement("strong");
-  title.textContent = `${commentSideLabel(comment)} line ${comment.line}`;
-  const remove = document.createElement("button");
-  remove.textContent = "Delete";
-  remove.addEventListener("click", () => removeComment(comment.id));
-  header.append(title, remove);
-
-  const textarea = document.createElement("textarea");
-  textarea.dataset.commentId = comment.id;
-  textarea.rows = 3;
-  textarea.placeholder = "Leave actionable feedback…";
-  textarea.value = comment.body;
-  textarea.addEventListener("input", () => {
-    comment.body = textarea.value;
-    updateSubmitButton();
-  });
-  textarea.addEventListener("keydown", (event) => {
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") textarea.blur();
-    if (event.key === "Escape" && comment.body.trim().length === 0) removeComment(comment.id);
-  });
-  container.append(header, textarea);
-  if (!comment.body) setTimeout(() => textarea.focus(), 20);
   return container;
 }
 
 function syncInlineComments(): void {
+  if (viewStyle === "unified") {
+    if (activePath == null || workspace == null) return;
+    unifiedView.syncComments(lineComments());
+    return;
+  }
+  const focused = captureFocusedComment();
   clearViewZones();
   if (!originalModel || !modifiedModel || activePath == null || workspace == null) return;
   const originalEditor = diffEditor.getOriginalEditor();
   const modifiedEditor = diffEditor.getModifiedEditor();
-  const inlineComments = comments.filter((comment) =>
-    comment.path === activePath && comment.mode === workspace!.mode && comment.side !== "file" && comment.line != null,
-  );
+  const inlineComments = lineComments();
   inlineComments.forEach((comment) => {
     const editor = comment.side === "original" ? originalEditor : modifiedEditor;
     const maxLine = editor.getModel()?.getLineCount() ?? comment.line!;
@@ -663,6 +713,7 @@ function syncInlineComments(): void {
     });
   });
   renderDecorations();
+  restoreFocusedComment(focused);
 }
 
 function addInlineComment(side: "original" | "modified", line: number): void {
@@ -672,13 +723,20 @@ function addInlineComment(side: "original" | "modified", line: number): void {
     document.querySelector<HTMLTextAreaElement>(`textarea[data-comment-id="${existing.id}"]`)?.focus();
     return;
   }
-  comments.push({ id: makeCommentId(), path: activePath, mode: workspace.mode, side, line, body: "" });
+  const created: UiComment = { id: makeCommentId(), path: activePath, mode: workspace.mode, side, line, body: "" };
+  comments.push(created);
   renderRecent();
   renderTree();
   updateSubmitButton();
   syncInlineComments();
-  const editor = side === "original" ? diffEditor.getOriginalEditor() : diffEditor.getModifiedEditor();
-  editor.revealLineInCenter(line);
+  if (viewStyle === "unified") {
+    unifiedView.scrollToComment(side, line);
+  } else {
+    const editor = side === "original" ? diffEditor.getOriginalEditor() : diffEditor.getModifiedEditor();
+    editor.revealLineInCenter(line);
+  }
+  // Only a brand-new draft takes focus; zone/row rebuilds never do.
+  document.querySelector<HTMLTextAreaElement>(`textarea[data-comment-id="${created.id}"]`)?.focus();
 }
 
 function installGutterComments(editor: monaco.editor.ICodeEditor, side: "original" | "modified"): void {
@@ -772,6 +830,7 @@ lineWrapButton.addEventListener("click", () => {
   // Monaco uses wordWrapOverride1 internally for diffWordWrap. Set the
   // higher-priority override too so both nested editors receive the toggle.
   diffEditor.updateOptions({ diffWordWrap: wordWrap, wordWrapOverride2: wordWrap });
+  unifiedView.setWrap(enabled);
 });
 fileCommentButton.addEventListener("click", openFileDraft);
 addCommentButton.addEventListener("click", addDraft);
@@ -796,11 +855,37 @@ submitButton.addEventListener("click", () => {
 closeButton.addEventListener("click", () => {
   send({ type: "close-window" });
 });
+function setViewStyle(next: ViewStyle): void {
+  if (viewStyle === next) return;
+  saveMountedScroll();
+  viewStyle = next;
+  persistViewStyle();
+  renderFilebar();
+  // Re-enter the mount path so the freshly selected view renders the file that
+  // is currently shown. A failed guard (mode switch in flight) leaves state
+  // intact; the pending workspace/file cycle re-mounts anyway.
+  if (lastFile != null && lastFile.path === activePath && workspace?.mode === lastFile.mode) mountFile(lastFile);
+  render();
+}
+viewUnifiedButton.addEventListener("click", () => setViewStyle("unified"));
+viewSplitButton.addEventListener("click", () => setViewStyle("split"));
+// The static HTML hardcodes Split as active; sync with the persisted choice
+// before the first workspace message drives renderFilebar.
+viewUnifiedButton.classList.toggle("active", viewStyle === "unified");
+viewSplitButton.classList.toggle("active", viewStyle === "split");
 window.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
     searchInput.focus();
     searchInput.select();
+  }
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
+    const target = event.target;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+    if (viewStyle === "unified" && activeFile() != null) {
+      event.preventDefault();
+      unifiedView.openSearch();
+    }
   }
 });
 window.setInterval(renderRecent, 10_000);

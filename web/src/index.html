@@ -56,6 +56,10 @@
           </div>
           <div class="file-actions">
             <span id="comment-hint" class="comment-hint">Click a line number to comment</span>
+            <div class="segment" aria-label="Diff view style">
+              <button id="view-unified" type="button" title="GitHub-style unified diff">Unified</button>
+              <button id="view-split" type="button" title="Side-by-side editor">Split</button>
+            </div>
             <button id="line-wrap" class="quiet" type="button" aria-pressed="false" title="Enable line wrap" disabled>Wrap lines</button>
             <button id="file-comment" class="quiet" disabled>Add file note</button>
           </div>
@@ -66,6 +70,7 @@
           <p>New agent changes will appear here.</p>
         </div>
         <div id="editor" class="editor hidden"></div>
+        <div id="unified" class="editor hidden"></div>
 
         <section id="feedback-panel" class="feedback-panel hidden">
           <div class="feedback-header">

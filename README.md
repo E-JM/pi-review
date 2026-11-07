@@ -116,6 +116,10 @@ The review window closes when pi shuts down, switches sessions, or reloads exten
 - A Git repository
 - macOS, Linux, or Windows supported by [Glimpse](https://github.com/hazat/glimpse)
 
+## Third-party licenses
+
+The bundled review window includes [jsdiff](https://github.com/jsdiff/jsdiff) (`diff`), distributed under the BSD-3-Clause license.
+
 ## Development
 
 ```sh
