@@ -64,8 +64,7 @@ export type WindowMessage =
   | { type: "ready" }
   | { type: "set-mode"; mode: ReviewMode }
   | { type: "request-file"; path: string; mode: ReviewMode; requestId: string }
-  | { type: "submit-review"; comments: ReviewComment[] }
-  | { type: "close-window" };
+  | { type: "submit-review"; comments: ReviewComment[] };
 
 export type HostMessage =
   | { type: "workspace"; state: WorkspaceState }

@@ -45,7 +45,6 @@ const repoMetaEl = byId("repo-meta");
 const checkpointButton = byId<HTMLButtonElement>("mode-checkpoint");
 const headButton = byId<HTMLButtonElement>("mode-head");
 const submitButton = byId<HTMLButtonElement>("submit-review");
-const closeButton = byId<HTMLButtonElement>("close-window");
 const searchInput = byId<HTMLInputElement>("search");
 const recentCountEl = byId("recent-count");
 const fileCountEl = byId("file-count");
@@ -851,9 +850,6 @@ submitButton.addEventListener("click", () => {
   submitButton.textContent = "Saving…";
   send({ type: "submit-review", comments });
   window.setTimeout(() => updateSubmitButton(), 5000);
-});
-closeButton.addEventListener("click", () => {
-  send({ type: "close-window" });
 });
 function setViewStyle(next: ViewStyle): void {
   if (viewStyle === next) return;

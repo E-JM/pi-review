@@ -144,10 +144,6 @@ export class ReviewController {
   }
 
   private async handleMessage(message: WindowMessage, ctx: ExtensionCommandContext): Promise<void> {
-    if (message.type === "close-window") {
-      await this.close();
-      return;
-    }
     if (this.model == null) return;
     if (message.type === "ready") {
       this.send({ type: "workspace", state: this.model.state() });
