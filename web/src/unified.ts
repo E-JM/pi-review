@@ -31,8 +31,9 @@ const COLORIZE_CACHE_MAX = 5000;
 const COLORIZE_MAX_CHARS = 1000;
 // Whole-side colorize (one call for a file's full content) is what keeps
 // Monarch state across lines — multi-line block comments otherwise tokenize
-// as code and highlight wrong. It is one synchronous pass, so oversized
-// sides fall back to stateless per-line coloring.
+// as code and highlight wrong. It is one synchronous pass, so sides past
+// this bound are ineligible: their rows colorize from the other side where
+// possible (equal rows), else fall back to stateless per-line coloring.
 const COLORIZE_SIDE_MAX_CHARS = 300_000;
 
 type IdleSchedule = (callback: () => void) => void;
