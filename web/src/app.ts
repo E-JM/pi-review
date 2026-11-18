@@ -219,7 +219,14 @@ function relativeTime(value?: number): string {
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
-  return `${Math.floor(minutes / 60)}h`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function ageLabel(value?: number): string {
+  const relative = relativeTime(value);
+  return relative === "now" ? "just now" : `${relative} ago`;
 }
 
 function matches(file: ChangedFile): boolean {
@@ -449,11 +456,11 @@ function renderTree(): void {
 
 function updateSubmitButton(): void {
   const count = workspace?.pendingFiles.length ?? 0;
-  const commentCount = comments.filter((comment) => comment.body.trim().length > 0).length;
+  const writtenCount = comments.filter((comment) => comment.body.trim().length > 0).length;
   // A half-typed draft counts too, so the submit button is live while typing.
   const draftCount = draft != null && draftInput.value.trim().length > 0 ? 1 : 0;
-  submitButton.disabled = count === 0 && commentCount === 0 && draftCount === 0;
-  const total = commentCount + draftCount;
+  submitButton.disabled = count === 0 && writtenCount === 0 && draftCount === 0;
+  const total = writtenCount + draftCount;
   if (total > 0) submitButton.textContent = `Submit ${total} comment${total === 1 ? "" : "s"} · review ${count}`;
   else if (count > 0) submitButton.textContent = `Mark ${count} reviewed`;
   else submitButton.textContent = "Mark reviewed";
@@ -463,7 +470,7 @@ function updateHeader(): void {
   if (workspace == null) return;
   repoNameEl.textContent = workspace.repoName;
   const baseline = workspace.hasCheckpoint && workspace.checkpointCreatedAt
-    ? `reviewed ${relativeTime(workspace.checkpointCreatedAt)} ago`
+    ? `reviewed ${ageLabel(workspace.checkpointCreatedAt)}`
     : "not reviewed yet";
   repoMetaEl.textContent = [workspace.branch, baseline].filter(Boolean).join(" · ");
   checkpointButton.classList.toggle("active", workspace.mode === "checkpoint");
@@ -610,10 +617,11 @@ function renderFeedback(): void {
   fileComments.forEach((comment) => {
     const row = document.createElement("div");
     row.className = "comment";
+    const label = commentLocation(comment);
     const location = document.createElement("div");
     location.className = "comment-location";
-    location.textContent = commentLocation(comment);
-    location.title = commentLocation(comment);
+    location.textContent = label;
+    location.title = label;
     const body = document.createElement("div");
     body.className = "comment-body";
     body.textContent = comment.body;
@@ -740,10 +748,10 @@ function addInlineComment(side: "original" | "modified", line: number): void {
 
 function installGutterComments(editor: monaco.editor.ICodeEditor, side: "original" | "modified"): void {
   let hoverDecorations: string[] = [];
+  const inGutter = (event: monaco.editor.IEditorMouseEvent): boolean =>
+    event.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS || event.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN;
   editor.onMouseMove((event) => {
-    const target = event.target;
-    const gutter = target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS || target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN;
-    const line = gutter ? target.position?.lineNumber : undefined;
+    const line = inGutter(event) ? event.target.position?.lineNumber : undefined;
     hoverDecorations = editor.deltaDecorations(hoverDecorations, line ? [{
       range: new monaco.Range(line, 1, line, 1),
       options: { glyphMarginClassName: "review-glyph-plus" },
@@ -753,17 +761,12 @@ function installGutterComments(editor: monaco.editor.ICodeEditor, side: "origina
     hoverDecorations = editor.deltaDecorations(hoverDecorations, []);
   });
   editor.onMouseDown((event) => {
-    const target = event.target;
-    const gutter = target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS || target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN;
-    const line = target.position?.lineNumber ?? target.range?.startLineNumber;
-    if (!gutter || line == null) return;
-    try {
-      addInlineComment(side, line);
-    } catch (error) {
-      showToast(`Could not add comment: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    const line = inGutter(event) ? event.target.position?.lineNumber ?? event.target.range?.startLineNumber : undefined;
+    if (line == null) return;
+    addInlineComment(side, line);
   });
 }
+
 const originalEditor = diffEditor.getOriginalEditor();
 const modifiedEditor = diffEditor.getModifiedEditor();
 installGutterComments(originalEditor, "original");
@@ -813,11 +816,11 @@ window.__reviewReceive = (message: HostMessage): void => {
 
 checkpointButton.addEventListener("click", () => {
   saveMountedScroll();
-  send({ type: "set-mode", mode: "checkpoint" as ReviewMode });
+  send({ type: "set-mode", mode: "checkpoint" });
 });
 headButton.addEventListener("click", () => {
   saveMountedScroll();
-  send({ type: "set-mode", mode: "head" as ReviewMode });
+  send({ type: "set-mode", mode: "head" });
 });
 searchInput.addEventListener("input", () => { renderRecent(); renderTree(); });
 lineWrapButton.addEventListener("click", () => {
