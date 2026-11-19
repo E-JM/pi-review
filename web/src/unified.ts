@@ -13,6 +13,7 @@ import {
   type LayoutItem,
 } from "./diff-model.js";
 import { captureFocusedComment, createInlineCommentElement, restoreFocusedComment, type UiComment } from "./comment.js";
+import { colorizeSourceFor, splitColorizedLines, type DiffSide } from "./colorize.js";
 import type { FileContents } from "../../src/types.js";
 
 export interface UnifiedHost {
@@ -28,6 +29,12 @@ const COLORIZE_BATCH = 8;
 const COLORIZE_CACHE_MAX = 5000;
 // Tokenizing a very long line can block for seconds; long rows stay plain.
 const COLORIZE_MAX_CHARS = 1000;
+// Whole-side colorize (one call for a file's full content) is what keeps
+// Monarch state across lines — multi-line block comments otherwise tokenize
+// as code and highlight wrong. It is one synchronous pass, so sides past
+// this bound are ineligible: their rows colorize from the other side where
+// possible (equal rows), else fall back to stateless per-line coloring.
+const COLORIZE_SIDE_MAX_CHARS = 300_000;
 
 type IdleSchedule = (callback: () => void) => void;
 const scheduleIdle: IdleSchedule = (() => {
@@ -64,6 +71,8 @@ export class UnifiedDiffView {
 
   private model: DiffModel | null = null;
   private language = "plaintext";
+  private originalContent = "";
+  private modifiedContent = "";
   private currentKey: string | null = null;
   private currentFingerprint: string | null = null;
   private states = new Map<string, PerFileState>();
@@ -74,6 +83,7 @@ export class UnifiedDiffView {
   private colorizeCache = new Map<string, Promise<string>>();
   private colorizeQueue: Array<() => void> = [];
   private colorizeDraining = false;
+  private sideLineHtml = new Map<DiffSide, Promise<string[]>>();
   private searchOpen = false;
   private searchQuery = "";
   private searchMatches: number[] = [];
@@ -140,10 +150,13 @@ export class UnifiedDiffView {
     }
     this.generation += 1;
     this.colorizeQueue.length = 0;
+    this.sideLineHtml.clear();
     this.currentKey = key;
     this.currentFingerprint = file.fingerprint;
     this.closeSearch();
     this.language = language;
+    this.originalContent = file.originalContent;
+    this.modifiedContent = file.modifiedContent;
     this.model = buildDiffModel(file.originalContent, file.modifiedContent);
     const state = this.states.get(key);
     const visible = state != null && state.fingerprint === file.fingerprint
@@ -164,6 +177,9 @@ export class UnifiedDiffView {
     this.closeSearch();
     this.generation += 1;
     this.colorizeQueue.length = 0;
+    this.sideLineHtml.clear();
+    this.originalContent = "";
+    this.modifiedContent = "";
     this.currentKey = null;
     this.currentFingerprint = null;
     this.model = null;
@@ -403,7 +419,7 @@ export class UnifiedDiffView {
     textSpan.textContent = row.text;
     code.append(textSpan);
     this.appendTruncationMarker(code, row);
-    this.queueColorize(textSpan, row.text, generation);
+    this.queueColorize(textSpan, row, generation);
   }
 
   private appendTruncationMarker(code: HTMLElement, row: DiffRow): void {
@@ -493,18 +509,56 @@ export class UnifiedDiffView {
 
   // --- syntax coloring ------------------------------------------------------
 
-  private queueColorize(code: HTMLElement, text: string, generation: number): void {
-    if (this.language === "plaintext" || !text.trim() || text.length > COLORIZE_MAX_CHARS) return;
-    const promise = this.colorizePromise(text);
+  // Whole-side colorize keeps Monarch token state across lines, so multi-line
+  // block comments render as comments instead of mis-highlighted code (per-line
+  // colorize restarts from the initial state and tokens a " * " continuation
+  // line as code). Display-truncated lines stay out: their HTML chunk contains
+  // the full source line, which cannot be spliced to the shown prefix.
+  private queueColorize(code: HTMLElement, row: DiffRow, generation: number): void {
+    if (this.language === "plaintext" || !row.text.trim()) return;
+    const source = row.fullLength == null
+      ? colorizeSourceFor(row, {
+        original: this.originalContent.length <= COLORIZE_SIDE_MAX_CHARS,
+        modified: this.modifiedContent.length <= COLORIZE_SIDE_MAX_CHARS,
+      })
+      : null;
+    if (source != null) {
+      const content = source.side === "original" ? this.originalContent : this.modifiedContent;
+      this.idle(() => {
+        if (generation !== this.generation || !code.isConnected) return;
+        if (this.searchQuery && row.text.toLowerCase().includes(this.searchQuery)) return;
+        void this.sideLinesFor(source.side, content).then((lines) => {
+          if (generation !== this.generation || !code.isConnected) return;
+          const html = lines[source.line - 1];
+          if (html) code.innerHTML = html;
+        }, () => {});
+      });
+      return;
+    }
+    if (row.text.length > COLORIZE_MAX_CHARS) return;
+    const promise = this.colorizePromise(row.text);
     this.idle(() => {
       if (generation !== this.generation || !code.isConnected) return;
-      if (this.searchQuery && text.toLowerCase().includes(this.searchQuery)) return;
+      if (this.searchQuery && row.text.toLowerCase().includes(this.searchQuery)) return;
       void promise.then((html) => {
         if (generation !== this.generation || !code.isConnected) return;
         if (!html) return;
         code.innerHTML = stripTrailingBr(html);
       }, () => {});
     });
+  }
+
+  // One colorize call per file side, memoized for the mounted content: the
+  // whole side is tokenized with carried state, then split into per-line HTML.
+  // Created lazily inside the idle queue so the synchronous tokenize pass
+  // never delays the initial paint.
+  private sideLinesFor(side: DiffSide, content: string): Promise<string[]> {
+    let promise = this.sideLineHtml.get(side);
+    if (promise == null) {
+      promise = monaco.editor.colorize(content, this.language, { tabSize: 4 }).then(splitColorizedLines).catch(() => []);
+      this.sideLineHtml.set(side, promise);
+    }
+    return promise;
   }
 
   private colorizePromise(text: string): Promise<string> {

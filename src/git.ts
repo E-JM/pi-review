@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { basename, dirname, join } from "node:path";
@@ -42,6 +41,9 @@ export async function getBranchName(pi: ExtensionAPI, repoRoot: string): Promise
   return branch || null;
 }
 
+// Parses `git status --porcelain=v1 -z` output: each entry is "XY <path>\0",
+// and rename/copy entries (R or C in XY) carry the original path as one extra
+// NUL-terminated field after the new path. Returns both paths for renames.
 export function parsePorcelainPaths(output: string): string[] {
   const fields = output.split("\0");
   const paths: string[] = [];
@@ -202,8 +204,4 @@ export async function fileMtime(repoRoot: string, path: string): Promise<number>
 
 export function repoName(repoRoot: string): string {
   return basename(repoRoot);
-}
-
-export function pathExists(repoRoot: string, path: string): boolean {
-  return existsSync(join(repoRoot, path));
 }

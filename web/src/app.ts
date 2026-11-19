@@ -69,6 +69,15 @@ const addCommentButton = byId<HTMLButtonElement>("add-comment");
 const cancelDraftButton = byId<HTMLButtonElement>("cancel-draft");
 const toastEl = byId("toast");
 
+interface ActiveViewZone { id: string; editor: monaco.editor.ICodeEditor; domNode: HTMLElement }
+
+interface ScrollPosition {
+  originalTop: number;
+  originalLeft: number;
+  modifiedTop: number;
+  modifiedLeft: number;
+}
+
 let workspace: WorkspaceState | null = null;
 let activePath: string | null = null;
 let mountedFingerprint = "";
@@ -77,14 +86,6 @@ let mountedMode: ReviewMode | null = null;
 const scrollPositions = new Map<string, ScrollPosition>();
 let activeRequestId = "";
 let requestCounter = 0;
-interface ActiveViewZone { id: string; editor: monaco.editor.ICodeEditor; domNode: HTMLElement }
-interface ScrollPosition {
-  originalTop: number;
-  originalLeft: number;
-  modifiedTop: number;
-  modifiedLeft: number;
-}
-
 let comments: UiComment[] = [];
 let draft: Omit<UiComment, "body" | "id"> | null = null;
 let activeViewZones: ActiveViewZone[] = [];
@@ -219,7 +220,14 @@ function relativeTime(value?: number): string {
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
-  return `${Math.floor(minutes / 60)}h`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function ageLabel(value?: number): string {
+  const relative = relativeTime(value);
+  return relative === "now" ? "just now" : `${relative} ago`;
 }
 
 function matches(file: ChangedFile): boolean {
@@ -305,6 +313,22 @@ function commentBadge(path: string): HTMLSpanElement | null {
   return badge;
 }
 
+// Sidebar markers shared by the Recently Changed list and the file tree.
+function reviewedCheck(): HTMLSpanElement {
+  const check = document.createElement("span");
+  check.className = "reviewed-check";
+  check.textContent = "✓";
+  check.title = "Matches the last reviewed checkpoint";
+  return check;
+}
+
+function pendingDot(): HTMLSpanElement {
+  const dot = document.createElement("span");
+  dot.className = "recent-dot";
+  dot.title = "Changed since the last review";
+  return dot;
+}
+
 function makeRecentRow(file: ChangedFile): HTMLButtonElement {
   const button = document.createElement("button");
   button.className = `file-row${file.path === activePath ? " active" : ""}`;
@@ -323,13 +347,7 @@ function makeRecentRow(file: ChangedFile): HTMLButtonElement {
   button.append(copy);
   const badge = commentBadge(file.path);
   if (badge) button.append(badge);
-  if (workspace?.mode === "head" && !isPendingReview(file.path)) {
-    const reviewed = document.createElement("span");
-    reviewed.className = "reviewed-check";
-    reviewed.textContent = "✓";
-    reviewed.title = "Matches the last reviewed checkpoint";
-    button.append(reviewed);
-  }
+  if (workspace?.mode === "head" && !isPendingReview(file.path)) button.append(reviewedCheck());
   button.append(time);
   button.addEventListener("click", () => selectPath(file.path, true));
   return button;
@@ -379,18 +397,8 @@ function appendTree(node: TreeNode, depth: number): void {
       row.append(label);
       const badge = commentBadge(child.file.path);
       if (badge) row.append(badge);
-      if (isPendingReview(child.file.path)) {
-        const dot = document.createElement("span");
-        dot.className = "recent-dot";
-        dot.title = "Changed since the last review";
-        row.append(dot);
-      } else if (workspace?.mode === "head") {
-        const reviewed = document.createElement("span");
-        reviewed.className = "reviewed-check";
-        reviewed.textContent = "✓";
-        reviewed.title = "Matches the last reviewed checkpoint";
-        row.append(reviewed);
-      }
+      if (isPendingReview(child.file.path)) row.append(pendingDot());
+      else if (workspace?.mode === "head") row.append(reviewedCheck());
       row.addEventListener("click", () => selectPath(child.file!.path));
       fileTreeEl.append(row);
       continue;
@@ -408,7 +416,8 @@ function appendTree(node: TreeNode, depth: number): void {
     label.textContent = child.name;
     row.append(chevron, label);
     row.addEventListener("click", () => {
-      collapsed ? collapsedDirs.delete(child.path) : collapsedDirs.add(child.path);
+      if (collapsed) collapsedDirs.delete(child.path);
+      else collapsedDirs.add(child.path);
       renderTree();
     });
     fileTreeEl.append(row);
@@ -419,8 +428,11 @@ function appendTree(node: TreeNode, depth: number): void {
 function renderRecent(): void {
   if (workspace == null) return;
   recentListEl.replaceChildren();
-  const activeFiles = new Map(workspace.files.map((file) => [file.path, file]));
-  const files = workspace.recentPaths.map((path) => activeFiles.get(path)).filter((file): file is ChangedFile => file != null).filter(matches);
+  // Same ordering as WorkspaceState.recentPaths, resolved against files so
+  // each row keeps its status/badge data.
+  const files = workspace.files
+    .filter(matches)
+    .sort((a, b) => (b.recentAt ?? 0) - (a.recentAt ?? 0) || a.path.localeCompare(b.path));
   recentCountEl.textContent = files.length ? String(files.length) : "";
   if (files.length === 0) {
     const empty = document.createElement("div");
@@ -449,11 +461,11 @@ function renderTree(): void {
 
 function updateSubmitButton(): void {
   const count = workspace?.pendingFiles.length ?? 0;
-  const commentCount = comments.filter((comment) => comment.body.trim().length > 0).length;
+  const writtenCount = comments.filter((comment) => comment.body.trim().length > 0).length;
   // A half-typed draft counts too, so the submit button is live while typing.
   const draftCount = draft != null && draftInput.value.trim().length > 0 ? 1 : 0;
-  submitButton.disabled = count === 0 && commentCount === 0 && draftCount === 0;
-  const total = commentCount + draftCount;
+  submitButton.disabled = count === 0 && writtenCount === 0 && draftCount === 0;
+  const total = writtenCount + draftCount;
   if (total > 0) submitButton.textContent = `Submit ${total} comment${total === 1 ? "" : "s"} · review ${count}`;
   else if (count > 0) submitButton.textContent = `Mark ${count} reviewed`;
   else submitButton.textContent = "Mark reviewed";
@@ -463,7 +475,7 @@ function updateHeader(): void {
   if (workspace == null) return;
   repoNameEl.textContent = workspace.repoName;
   const baseline = workspace.hasCheckpoint && workspace.checkpointCreatedAt
-    ? `reviewed ${relativeTime(workspace.checkpointCreatedAt)} ago`
+    ? `reviewed ${ageLabel(workspace.checkpointCreatedAt)}`
     : "not reviewed yet";
   repoMetaEl.textContent = [workspace.branch, baseline].filter(Boolean).join(" · ");
   checkpointButton.classList.toggle("active", workspace.mode === "checkpoint");
@@ -572,8 +584,9 @@ function mountFile(file: FileContents): void {
 }
 
 function lineComments(): UiComment[] {
-  if (activePath == null || workspace == null) return [];
-  return comments.filter((comment) => comment.path === activePath && comment.mode === workspace!.mode && comment.side !== "file" && comment.line != null);
+  const mode = workspace?.mode;
+  if (activePath == null || mode == null) return [];
+  return comments.filter((comment) => comment.path === activePath && comment.mode === mode && comment.side !== "file" && comment.line != null);
 }
 
 function lineWrapEnabled(): boolean {
@@ -581,10 +594,11 @@ function lineWrapEnabled(): boolean {
 }
 
 function requestActiveFile(): void {
-  const file = activeFile();
+  const mode = workspace?.mode;
+  const file = mode == null ? null : activeFile();
   if (file == null || file.fingerprint === mountedFingerprint) return;
   activeRequestId = `file:${++requestCounter}`;
-  send({ type: "request-file", requestId: activeRequestId, path: file.path, mode: workspace!.mode });
+  send({ type: "request-file", requestId: activeRequestId, path: file.path, mode });
 }
 
 function commentLocation(comment: ReviewComment): string {
@@ -610,10 +624,11 @@ function renderFeedback(): void {
   fileComments.forEach((comment) => {
     const row = document.createElement("div");
     row.className = "comment";
+    const label = commentLocation(comment);
     const location = document.createElement("div");
     location.className = "comment-location";
-    location.textContent = commentLocation(comment);
-    location.title = commentLocation(comment);
+    location.textContent = label;
+    location.title = label;
     const body = document.createElement("div");
     body.className = "comment-body";
     body.textContent = comment.body;
@@ -716,13 +731,14 @@ function syncInlineComments(): void {
 }
 
 function addInlineComment(side: "original" | "modified", line: number): void {
-  if (activePath == null || workspace == null) return;
-  const existing = comments.find((comment) => comment.path === activePath && comment.mode === workspace!.mode && comment.side === side && comment.line === line);
+  const mode = workspace?.mode;
+  if (activePath == null || mode == null) return;
+  const existing = comments.find((comment) => comment.path === activePath && comment.mode === mode && comment.side === side && comment.line === line);
   if (existing) {
     document.querySelector<HTMLTextAreaElement>(`textarea[data-comment-id="${existing.id}"]`)?.focus();
     return;
   }
-  const created: UiComment = { id: makeCommentId(), path: activePath, mode: workspace.mode, side, line, body: "" };
+  const created: UiComment = { id: makeCommentId(), path: activePath, mode, side, line, body: "" };
   comments.push(created);
   renderRecent();
   renderTree();
@@ -740,10 +756,10 @@ function addInlineComment(side: "original" | "modified", line: number): void {
 
 function installGutterComments(editor: monaco.editor.ICodeEditor, side: "original" | "modified"): void {
   let hoverDecorations: string[] = [];
+  const inGutter = (event: monaco.editor.IEditorMouseEvent): boolean =>
+    event.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS || event.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN;
   editor.onMouseMove((event) => {
-    const target = event.target;
-    const gutter = target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS || target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN;
-    const line = gutter ? target.position?.lineNumber : undefined;
+    const line = inGutter(event) ? event.target.position?.lineNumber : undefined;
     hoverDecorations = editor.deltaDecorations(hoverDecorations, line ? [{
       range: new monaco.Range(line, 1, line, 1),
       options: { glyphMarginClassName: "review-glyph-plus" },
@@ -753,17 +769,12 @@ function installGutterComments(editor: monaco.editor.ICodeEditor, side: "origina
     hoverDecorations = editor.deltaDecorations(hoverDecorations, []);
   });
   editor.onMouseDown((event) => {
-    const target = event.target;
-    const gutter = target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS || target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN;
-    const line = target.position?.lineNumber ?? target.range?.startLineNumber;
-    if (!gutter || line == null) return;
-    try {
-      addInlineComment(side, line);
-    } catch (error) {
-      showToast(`Could not add comment: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    const line = inGutter(event) ? event.target.position?.lineNumber ?? event.target.range?.startLineNumber : undefined;
+    if (line == null) return;
+    addInlineComment(side, line);
   });
 }
+
 const originalEditor = diffEditor.getOriginalEditor();
 const modifiedEditor = diffEditor.getModifiedEditor();
 installGutterComments(originalEditor, "original");
@@ -813,11 +824,11 @@ window.__reviewReceive = (message: HostMessage): void => {
 
 checkpointButton.addEventListener("click", () => {
   saveMountedScroll();
-  send({ type: "set-mode", mode: "checkpoint" as ReviewMode });
+  send({ type: "set-mode", mode: "checkpoint" });
 });
 headButton.addEventListener("click", () => {
   saveMountedScroll();
-  send({ type: "set-mode", mode: "head" as ReviewMode });
+  send({ type: "set-mode", mode: "head" });
 });
 searchInput.addEventListener("input", () => { renderRecent(); renderTree(); });
 lineWrapButton.addEventListener("click", () => {
@@ -849,6 +860,7 @@ submitButton.addEventListener("click", () => {
   submitButton.disabled = true;
   submitButton.textContent = "Saving…";
   send({ type: "submit-review", comments });
+  // The host replies via review-submitted; re-enable anyway if it never does.
   window.setTimeout(() => updateSubmitButton(), 5000);
 });
 function setViewStyle(next: ViewStyle): void {
@@ -884,6 +896,7 @@ window.addEventListener("keydown", (event) => {
     }
   }
 });
+// Keep the "2m ago" timestamps in Recently Changed fresh without a push.
 window.setInterval(renderRecent, 10_000);
 
 const announceReady = (): void => {
