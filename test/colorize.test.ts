@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { colorizeSourceFor, splitColorizedLines } from "../web/src/colorize.js";
+import { colorizeSourceFor, splitAtWordBounds, splitColorizedLines, wordBounds } from "../web/src/colorize.js";
 
 test("splitColorizedLines splits monaco colorize output into per-line chunks", () => {
   const html = "<span>a</span><br/><span>b</span><br/>";
@@ -40,4 +40,77 @@ test("colorizeSourceFor returns null when no side is colorizable", () => {
   assert.equal(colorizeSourceFor({ type: "add", oldLine: null, newLine: 4 }, { original: true, modified: false }), null);
   assert.equal(colorizeSourceFor({ type: "del", oldLine: 7, newLine: null }, { original: false, modified: true }), null);
   assert.equal(colorizeSourceFor({ type: "equal", oldLine: 3, newLine: 3 }, { original: false, modified: false }), null);
+});
+
+test("wordBounds keeps only non-empty changed fragments", () => {
+  const bounds = wordBounds([
+    { text: "abc ", kind: "equal" },
+    { text: "de", kind: "del" },
+    { text: " ", kind: "equal" },
+    { text: "f", kind: "add" },
+    { text: "", kind: "add" },
+  ]);
+  assert.deepEqual(bounds, [
+    { start: 4, end: 6, className: "u-w-del" },
+    { start: 7, end: 8, className: "u-w-add" },
+  ]);
+});
+
+test("wordBounds returns empty when everything is unchanged", () => {
+  assert.deepEqual(wordBounds([{ text: "same", kind: "equal" }]), []);
+});
+
+test("splitAtWordBounds keeps a run outside all bounds intact", () => {
+  const result = splitAtWordBounds("plain text", 0, [{ start: 20, end: 24, className: "u-w-del" }], 0);
+  assert.deepEqual(result, { pieces: [{ text: "plain text", className: null }], nextIndex: 0 });
+});
+
+test("splitAtWordBounds boxes the changed middle of a run", () => {
+  const result = splitAtWordBounds("old new tail", 0, [{ start: 4, end: 7, className: "u-w-add" }], 0);
+  assert.deepEqual(result.pieces, [
+    { text: "old ", className: null },
+    { text: "new", className: "u-w-add" },
+    { text: " tail", className: null },
+  ]);
+  assert.equal(result.nextIndex, 1);
+});
+
+test("splitAtWordBounds spans multiple bounds in one run", () => {
+  const bounds = [
+    { start: 1, end: 2, className: "u-w-del" },
+    { start: 4, end: 6, className: "u-w-add" },
+  ];
+  const result = splitAtWordBounds("abcd efg", 0, bounds, 0);
+  assert.deepEqual(result.pieces, [
+    { text: "a", className: null },
+    { text: "b", className: "u-w-del" },
+    { text: "cd", className: null },
+    { text: " e", className: "u-w-add" },
+    { text: "fg", className: null },
+  ]);
+  assert.equal(result.nextIndex, 2);
+});
+
+test("splitAtWordBounds leaves a bound open until a run passes its end", () => {
+  const bounds = [{ start: 1, end: 3, className: "u-w-del" }];
+  const first = splitAtWordBounds("ab", 0, bounds, 0);
+  assert.deepEqual(first.pieces, [
+    { text: "a", className: null },
+    { text: "b", className: "u-w-del" },
+  ]);
+  assert.equal(first.nextIndex, 0);
+  const second = splitAtWordBounds("cd", 2, bounds, first.nextIndex);
+  assert.deepEqual(second.pieces, [
+    { text: "c", className: "u-w-del" },
+    { text: "d", className: null },
+  ]);
+  assert.equal(second.nextIndex, 1);
+});
+
+test("splitAtWordBounds resumes mid-bound in a later run", () => {
+  const bounds = [{ start: 1, end: 4, className: "u-w-del" }];
+  const first = splitAtWordBounds("ab", 0, bounds, 0);
+  const second = splitAtWordBounds("cd", 2, bounds, first.nextIndex);
+  assert.deepEqual(second.pieces, [{ text: "cd", className: "u-w-del" }]);
+  assert.equal(second.nextIndex, 1);
 });

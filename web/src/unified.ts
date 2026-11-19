@@ -11,9 +11,10 @@ import {
   type DiffRow,
   type Interval,
   type LayoutItem,
+  type WordSpan,
 } from "./diff-model.js";
 import { captureFocusedComment, createInlineCommentElement, restoreFocusedComment, type UiComment } from "./comment.js";
-import { colorizeSourceFor, splitColorizedLines, type DiffSide } from "./colorize.js";
+import { colorizeSourceFor, splitAtWordBounds, splitColorizedLines, wordBounds, type DiffSide } from "./colorize.js";
 import type { FileContents } from "../../src/types.js";
 
 export interface UnifiedHost {
@@ -411,6 +412,9 @@ export class UnifiedDiffView {
     }
     if (row.spans != null) {
       for (const span of row.spans) code.append(el("span", `u-w-${span.kind}`, span.text));
+      // Upgrade the plain paint to syntax-colored tokens with the word-diff
+      // boxes re-applied; it stays as the fallback when colorize is missing.
+      this.queueColorize(code, row, generation, (html) => this.mergeWordDiffBoxes(html, row.spans!));
       return;
     }
     // Truncation markers must survive colorize, which replaces the text span's
@@ -514,8 +518,19 @@ export class UnifiedDiffView {
   // colorize restarts from the initial state and tokens a " * " continuation
   // line as code). Display-truncated lines stay out: their HTML chunk contains
   // the full source line, which cannot be spliced to the shown prefix.
-  private queueColorize(code: HTMLElement, row: DiffRow, generation: number): void {
+  // `decorate` reworks colorized line HTML before it lands in the row (used to
+  // re-apply word-diff boxes on token spans); when it returns null the row
+  // keeps whatever is already painted there.
+  private queueColorize(code: HTMLElement, row: DiffRow, generation: number, decorate?: (html: string) => DocumentFragment | null): void {
     if (this.language === "plaintext" || !row.text.trim()) return;
+    const apply = (html: string) => {
+      if (decorate == null) {
+        code.innerHTML = html;
+        return;
+      }
+      const merged = decorate(html);
+      if (merged != null) code.replaceChildren(merged);
+    };
     const source = row.fullLength == null
       ? colorizeSourceFor(row, {
         original: this.originalContent.length <= COLORIZE_SIDE_MAX_CHARS,
@@ -530,7 +545,7 @@ export class UnifiedDiffView {
         void this.sideLinesFor(source.side, content).then((lines) => {
           if (generation !== this.generation || !code.isConnected) return;
           const html = lines[source.line - 1];
-          if (html) code.innerHTML = html;
+          if (html) apply(html);
         }, () => {});
       });
       return;
@@ -543,9 +558,40 @@ export class UnifiedDiffView {
       void promise.then((html) => {
         if (generation !== this.generation || !code.isConnected) return;
         if (!html) return;
-        code.innerHTML = stripTrailingBr(html);
+        apply(stripTrailingBr(html));
       }, () => {});
     });
+  }
+
+  // Re-applies word-diff boxes on top of colorized line HTML: token spans are
+  // kept intact and only their text nodes are split at fragment boundaries,
+  // so syntax colors survive under the box backgrounds. Returns null when the
+  // HTML's decoded text does not match the spans' text (tab expansion, stale
+  // side content, …) — the plain word-diff paint then stays.
+  private mergeWordDiffBoxes(html: string, spans: readonly WordSpan[]): DocumentFragment | null {
+    const text = spans.map((span) => span.text).join("");
+    const bounds = wordBounds(spans);
+    if (bounds.length === 0) return null;
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT);
+    const nodes: Text[] = [];
+    for (let node = walker.nextNode(); node != null; node = walker.nextNode()) nodes.push(node as Text);
+    let offset = 0;
+    let boundIndex = 0;
+    for (const textNode of nodes) {
+      const { pieces, nextIndex } = splitAtWordBounds(textNode.data, offset, bounds, boundIndex);
+      boundIndex = nextIndex;
+      offset += textNode.data.length;
+      if (pieces.length === 1 && pieces[0].className == null) continue;
+      const fragment = document.createDocumentFragment();
+      for (const piece of pieces) {
+        fragment.append(piece.className == null ? document.createTextNode(piece.text) : el("span", piece.className, piece.text));
+      }
+      textNode.parentNode?.replaceChild(fragment, textNode);
+    }
+    if (boundIndex < bounds.length || offset !== text.length) return null;
+    return template.content;
   }
 
   // One colorize call per file side, memoized for the mounted content: the
