@@ -2,7 +2,10 @@ import { chmodSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
 import { ReviewController } from "./controller.js";
 
 // glimpseui's native Linux backend renders the window as a gtk4-layer-shell
@@ -20,17 +23,31 @@ const launcherPath = join(tmpdir(), "pi-review-glimpse-backend.mjs");
 
 function prepareLinuxGlimpseBackend(): void {
   if (process.platform !== "linux") return;
-  const override = process.env.GLIMPSE_BINARY_PATH ?? process.env.GLIMPSE_HOST_PATH;
-  if (override != null && override !== launcherPath && basename(override) !== basename(launcherPath)) return;
+  const override =
+    process.env.GLIMPSE_BINARY_PATH ?? process.env.GLIMPSE_HOST_PATH;
+  if (
+    override != null &&
+    override !== launcherPath &&
+    basename(override) !== basename(launcherPath)
+  )
+    return;
   if (process.env.GLIMPSE_BACKEND === "native") return;
 
   // Sibling check covers local/relative installs (deps next to the package);
   // import.meta.resolve covers hoisted layouts (npm/git installs).
-  const sibling = new URL("../node_modules/glimpseui/src/chromium-backend.mjs", import.meta.url);
-  let backendPath: string | null = existsSync(sibling) ? fileURLToPath(sibling) : null;
+  const sibling = new URL(
+    "../node_modules/glimpseui/src/chromium-backend.mjs",
+    import.meta.url,
+  );
+  let backendPath: string | null = existsSync(sibling)
+    ? fileURLToPath(sibling)
+    : null;
   if (backendPath == null) {
     try {
-      backendPath = join(dirname(fileURLToPath(import.meta.resolve("glimpseui"))), "chromium-backend.mjs");
+      backendPath = join(
+        dirname(fileURLToPath(import.meta.resolve("glimpseui"))),
+        "chromium-backend.mjs",
+      );
     } catch {
       backendPath = null;
     }
@@ -62,7 +79,9 @@ await import(${JSON.stringify(backendPath)});
 `;
   writeFileSync(launcherPath, script, { mode: 0o755 });
   // Defeat a restrictive umask: the launcher must stay executable.
-  try { chmodSync(launcherPath, 0o755); } catch {}
+  try {
+    chmodSync(launcherPath, 0o755);
+  } catch {}
   process.env.GLIMPSE_BINARY_PATH = launcherPath;
 }
 
@@ -80,7 +99,10 @@ export default function reviewLoop(pi: ExtensionAPI) {
     return controller;
   };
 
-  const openReview = async (_args: string, ctx: ExtensionCommandContext): Promise<void> => {
+  const openReview = async (
+    _args: string,
+    ctx: ExtensionCommandContext,
+  ): Promise<void> => {
     if (ctx.mode !== "tui") {
       ctx.ui.notify("Review Loop requires interactive TUI mode.", "warning");
       return;
@@ -93,7 +115,10 @@ export default function reviewLoop(pi: ExtensionAPI) {
       // them instead of leaking a half-initialized controller.
       await active.close();
       controller = null;
-      ctx.ui.notify(`Could not open Review Loop: ${error instanceof Error ? error.message : String(error)}`, "error");
+      ctx.ui.notify(
+        `Could not open Review Loop: ${error instanceof Error ? error.message : String(error)}`,
+        "error",
+      );
     }
   };
 

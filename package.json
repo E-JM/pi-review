@@ -21,6 +21,9 @@
     "build:web": "node scripts/build-web.mjs",
     "check": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome check .",
     "build": "npm run build:web && npm run check",
     "prepublishOnly": "npm run build && npm test"
   },
@@ -32,6 +35,7 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.8",
     "@earendil-works/pi-coding-agent": "*",
     "@types/node": "^24.5.2",
     "diff": "^9.0.0",

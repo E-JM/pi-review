@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { colorizeSourceFor, matchesColorizedText, splitAtWordBounds, splitColorizedLines, wordBounds } from "../web/src/colorize.js";
+import {
+  colorizeSourceFor,
+  matchesColorizedText,
+  splitAtWordBounds,
+  splitColorizedLines,
+  wordBounds,
+} from "../web/src/colorize.js";
 
 test("splitColorizedLines splits monaco colorize output into per-line chunks", () => {
   const html = "<span>a</span><br/><span>b</span><br/>";
-  assert.deepEqual(splitColorizedLines(html), ["<span>a</span>", "<span>b</span>"]);
+  assert.deepEqual(splitColorizedLines(html), [
+    "<span>a</span>",
+    "<span>b</span>",
+  ]);
 });
 
 test("splitColorizedLines keeps the trailing empty line of newline-terminated input", () => {
@@ -14,7 +23,10 @@ test("splitColorizedLines keeps the trailing empty line of newline-terminated in
 
 test("splitColorizedLines tolerates output without a trailing separator", () => {
   const html = "<span>a</span><br/><span>b</span>";
-  assert.deepEqual(splitColorizedLines(html), ["<span>a</span>", "<span>b</span>"]);
+  assert.deepEqual(splitColorizedLines(html), [
+    "<span>a</span>",
+    "<span>b</span>",
+  ]);
 });
 
 test("splitColorizedLines keeps escaped content intact", () => {
@@ -24,22 +36,52 @@ test("splitColorizedLines keeps escaped content intact", () => {
 
 test("colorizeSourceFor picks the side that owns the row", () => {
   const eligible = { original: true, modified: true };
-  assert.deepEqual(colorizeSourceFor({ type: "add", oldLine: null, newLine: 4 }, eligible), { side: "modified", line: 4 });
-  assert.deepEqual(colorizeSourceFor({ type: "del", oldLine: 7, newLine: null }, eligible), { side: "original", line: 7 });
-  assert.deepEqual(colorizeSourceFor({ type: "equal", oldLine: 3, newLine: 3 }, eligible), { side: "modified", line: 3 });
+  assert.deepEqual(
+    colorizeSourceFor({ type: "add", oldLine: null, newLine: 4 }, eligible),
+    { side: "modified", line: 4 },
+  );
+  assert.deepEqual(
+    colorizeSourceFor({ type: "del", oldLine: 7, newLine: null }, eligible),
+    { side: "original", line: 7 },
+  );
+  assert.deepEqual(
+    colorizeSourceFor({ type: "equal", oldLine: 3, newLine: 3 }, eligible),
+    { side: "modified", line: 3 },
+  );
 });
 
 test("colorizeSourceFor prefers the colorizable side for equal rows", () => {
   assert.deepEqual(
-    colorizeSourceFor({ type: "equal", oldLine: 3, newLine: 3 }, { original: true, modified: false }),
+    colorizeSourceFor(
+      { type: "equal", oldLine: 3, newLine: 3 },
+      { original: true, modified: false },
+    ),
     { side: "original", line: 3 },
   );
 });
 
 test("colorizeSourceFor returns null when no side is colorizable", () => {
-  assert.equal(colorizeSourceFor({ type: "add", oldLine: null, newLine: 4 }, { original: true, modified: false }), null);
-  assert.equal(colorizeSourceFor({ type: "del", oldLine: 7, newLine: null }, { original: false, modified: true }), null);
-  assert.equal(colorizeSourceFor({ type: "equal", oldLine: 3, newLine: 3 }, { original: false, modified: false }), null);
+  assert.equal(
+    colorizeSourceFor(
+      { type: "add", oldLine: null, newLine: 4 },
+      { original: true, modified: false },
+    ),
+    null,
+  );
+  assert.equal(
+    colorizeSourceFor(
+      { type: "del", oldLine: 7, newLine: null },
+      { original: false, modified: true },
+    ),
+    null,
+  );
+  assert.equal(
+    colorizeSourceFor(
+      { type: "equal", oldLine: 3, newLine: 3 },
+      { original: false, modified: false },
+    ),
+    null,
+  );
 });
 
 test("wordBounds keeps only non-empty changed fragments", () => {
@@ -61,20 +103,39 @@ test("wordBounds returns empty when everything is unchanged", () => {
 });
 
 test("splitAtWordBounds keeps a run outside all bounds intact", () => {
-  const result = splitAtWordBounds("plain text", 0, [{ start: 20, end: 24, className: "u-w-del" }], 0);
-  assert.deepEqual(result, { pieces: [{ text: "plain text", className: null }], nextIndex: 0 });
+  const result = splitAtWordBounds(
+    "plain text",
+    0,
+    [{ start: 20, end: 24, className: "u-w-del" }],
+    0,
+  );
+  assert.deepEqual(result, {
+    pieces: [{ text: "plain text", className: null }],
+    nextIndex: 0,
+  });
 });
 
 test("splitAtWordBounds handles empty bounds and empty runs", () => {
-  assert.deepEqual(splitAtWordBounds("abc", 0, [], 0), { pieces: [{ text: "abc", className: null }], nextIndex: 0 });
-  assert.deepEqual(splitAtWordBounds("", 0, [{ start: 1, end: 3, className: "u-w-del" }], 1), { pieces: [], nextIndex: 1 });
+  assert.deepEqual(splitAtWordBounds("abc", 0, [], 0), {
+    pieces: [{ text: "abc", className: null }],
+    nextIndex: 0,
+  });
+  assert.deepEqual(
+    splitAtWordBounds("", 0, [{ start: 1, end: 3, className: "u-w-del" }], 1),
+    { pieces: [], nextIndex: 1 },
+  );
 });
 
 test("splitAtWordBounds handles touching del/add bounds", () => {
-  const result = splitAtWordBounds("abcd", 0, [
-    { start: 0, end: 2, className: "u-w-del" },
-    { start: 2, end: 4, className: "u-w-add" },
-  ], 0);
+  const result = splitAtWordBounds(
+    "abcd",
+    0,
+    [
+      { start: 0, end: 2, className: "u-w-del" },
+      { start: 2, end: 4, className: "u-w-add" },
+    ],
+    0,
+  );
   assert.deepEqual(result.pieces, [
     { text: "ab", className: "u-w-del" },
     { text: "cd", className: "u-w-add" },
@@ -83,7 +144,12 @@ test("splitAtWordBounds handles touching del/add bounds", () => {
 });
 
 test("splitAtWordBounds boxes the changed middle of a run", () => {
-  const result = splitAtWordBounds("old new tail", 0, [{ start: 4, end: 7, className: "u-w-add" }], 0);
+  const result = splitAtWordBounds(
+    "old new tail",
+    0,
+    [{ start: 4, end: 7, className: "u-w-add" }],
+    0,
+  );
   assert.deepEqual(result.pieces, [
     { text: "old ", className: null },
     { text: "new", className: "u-w-add" },

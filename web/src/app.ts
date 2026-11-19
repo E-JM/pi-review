@@ -13,9 +13,22 @@ import "monaco-editor/languages/definitions/rust/register.js";
 import "monaco-editor/languages/definitions/shell/register.js";
 import "monaco-editor/languages/definitions/typescript/register.js";
 import "monaco-editor/languages/definitions/yaml/register.js";
-import type { ChangedFile, FileContents, HostMessage, ReviewComment, ReviewMode, WorkspaceState } from "../../src/types.js";
+import type {
+  ChangedFile,
+  FileContents,
+  HostMessage,
+  ReviewComment,
+  ReviewMode,
+  WorkspaceState,
+} from "../../src/types.js";
+import {
+  captureFocusedComment,
+  commentSideLabel,
+  createInlineCommentElement,
+  restoreFocusedComment,
+  type UiComment,
+} from "./comment.js";
 import { UnifiedDiffView } from "./unified.js";
-import { commentSideLabel, captureFocusedComment, createInlineCommentElement, restoreFocusedComment, type UiComment } from "./comment.js";
 
 declare global {
   interface Window {
@@ -29,7 +42,9 @@ declare global {
 let workerUrl: string | null = null;
 window.MonacoEnvironment = {
   getWorker: () => {
-    workerUrl ??= URL.createObjectURL(new Blob([window.__reviewWorkerSource], { type: "text/javascript" }));
+    workerUrl ??= URL.createObjectURL(
+      new Blob([window.__reviewWorkerSource], { type: "text/javascript" }),
+    );
     return new Worker(workerUrl);
   },
 };
@@ -69,7 +84,11 @@ const addCommentButton = byId<HTMLButtonElement>("add-comment");
 const cancelDraftButton = byId<HTMLButtonElement>("cancel-draft");
 const toastEl = byId("toast");
 
-interface ActiveViewZone { id: string; editor: monaco.editor.ICodeEditor; domNode: HTMLElement }
+interface ActiveViewZone {
+  id: string;
+  editor: monaco.editor.ICodeEditor;
+  domNode: HTMLElement;
+}
 
 interface ScrollPosition {
   originalTop: number;
@@ -99,7 +118,9 @@ const VIEW_STYLE_KEY = "review-loop:view";
 
 function loadViewStyle(): ViewStyle {
   try {
-    return localStorage.getItem(VIEW_STYLE_KEY) === "unified" ? "unified" : "split";
+    return localStorage.getItem(VIEW_STYLE_KEY) === "unified"
+      ? "unified"
+      : "split";
   } catch {
     return "split";
   }
@@ -152,7 +173,12 @@ const diffEditor = monaco.editor.createDiffEditor(editorEl, {
   automaticLayout: true,
   renderSideBySide: true,
   enableSplitViewResizing: true,
-  minimap: { enabled: true, renderCharacters: false, showSlider: "always", size: "proportional" },
+  minimap: {
+    enabled: true,
+    renderCharacters: false,
+    showSlider: "always",
+    size: "proportional",
+  },
   glyphMargin: true,
   folding: true,
   lineNumbersMinChars: 3,
@@ -165,7 +191,8 @@ const diffEditor = monaco.editor.createDiffEditor(editorEl, {
   diffWordWrap: "off",
   hideUnchangedRegions: { enabled: false },
   padding: { top: 8, bottom: 8 },
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+  fontFamily:
+    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
   fontSize: 12,
   lineHeight: 19,
 });
@@ -190,7 +217,10 @@ function showToast(message: string): void {
   window.clearTimeout(toastTimer);
   toastEl.textContent = message;
   toastEl.classList.add("visible");
-  toastTimer = window.setTimeout(() => toastEl.classList.remove("visible"), 2200);
+  toastTimer = window.setTimeout(
+    () => toastEl.classList.remove("visible"),
+    2200,
+  );
 }
 
 function statusLetter(status: ChangedFile["status"]): string {
@@ -246,7 +276,10 @@ function saveMountedScroll(): void {
     // already moved (view-toggle window) — never save that offset for the
     // new file.
     if (!unifiedView.isShowing(mountedPath, mountedMode)) return;
-    unifiedScrollTops.set(scrollKey(mountedPath, mountedMode), unifiedView.saveScroll());
+    unifiedScrollTops.set(
+      scrollKey(mountedPath, mountedMode),
+      unifiedView.saveScroll(),
+    );
     return;
   }
   if (originalModel == null || modifiedModel == null) return;
@@ -269,8 +302,14 @@ function restoreScroll(path: string, mode: ReviewMode): void {
   };
   const originalEditor = diffEditor.getOriginalEditor();
   const modifiedEditor = diffEditor.getModifiedEditor();
-  originalEditor.setScrollPosition({ scrollTop: position.originalTop, scrollLeft: position.originalLeft });
-  modifiedEditor.setScrollPosition({ scrollTop: position.modifiedTop, scrollLeft: position.modifiedLeft });
+  originalEditor.setScrollPosition({
+    scrollTop: position.originalTop,
+    scrollLeft: position.originalLeft,
+  });
+  modifiedEditor.setScrollPosition({
+    scrollTop: position.modifiedTop,
+    scrollLeft: position.modifiedLeft,
+  });
 }
 
 function selectPath(path: string, preferCheckpoint = false): void {
@@ -347,7 +386,8 @@ function makeRecentRow(file: ChangedFile): HTMLButtonElement {
   button.append(copy);
   const badge = commentBadge(file.path);
   if (badge) button.append(badge);
-  if (workspace?.mode === "head" && !isPendingReview(file.path)) button.append(reviewedCheck());
+  if (workspace?.mode === "head" && !isPendingReview(file.path))
+    button.append(reviewedCheck());
   button.append(time);
   button.addEventListener("click", () => selectPath(file.path, true));
   return button;
@@ -387,19 +427,20 @@ function appendTree(node: TreeNode, depth: number): void {
   });
   for (const child of children) {
     if (child.file) {
+      const file = child.file;
       const row = document.createElement("button");
-      row.className = `tree-row${child.file.path === activePath ? " active" : ""}`;
+      row.className = `tree-row${file.path === activePath ? " active" : ""}`;
       row.style.paddingLeft = `${8 + depth * 12}px`;
-      row.append(statusSpan(child.file));
+      row.append(statusSpan(file));
       const label = document.createElement("span");
       label.className = "label";
       label.textContent = child.name;
       row.append(label);
-      const badge = commentBadge(child.file.path);
+      const badge = commentBadge(file.path);
       if (badge) row.append(badge);
-      if (isPendingReview(child.file.path)) row.append(pendingDot());
+      if (isPendingReview(file.path)) row.append(pendingDot());
       else if (workspace?.mode === "head") row.append(reviewedCheck());
-      row.addEventListener("click", () => selectPath(child.file!.path));
+      row.addEventListener("click", () => selectPath(file.path));
       fileTreeEl.append(row);
       continue;
     }
@@ -432,16 +473,25 @@ function renderRecent(): void {
   // each row keeps its status/badge data.
   const files = workspace.files
     .filter(matches)
-    .sort((a, b) => (b.recentAt ?? 0) - (a.recentAt ?? 0) || a.path.localeCompare(b.path));
+    .sort(
+      (a, b) =>
+        (b.recentAt ?? 0) - (a.recentAt ?? 0) || a.path.localeCompare(b.path),
+    );
   recentCountEl.textContent = files.length ? String(files.length) : "";
   if (files.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-list";
-    empty.textContent = workspace.files.length ? "No recent matches" : workspace.mode === "checkpoint" ? "No new changes" : "Working tree is clean";
+    empty.textContent = workspace.files.length
+      ? "No recent matches"
+      : workspace.mode === "checkpoint"
+        ? "No new changes"
+        : "Working tree is clean";
     recentListEl.append(empty);
     return;
   }
-  files.forEach((file) => recentListEl.append(makeRecentRow(file)));
+  files.forEach((file) => {
+    recentListEl.append(makeRecentRow(file));
+  });
 }
 
 function renderTree(): void {
@@ -452,7 +502,11 @@ function renderTree(): void {
   if (files.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-list";
-    empty.textContent = searchInput.value ? "No matching files" : workspace.mode === "checkpoint" ? "Nothing since the last review" : "Working tree is clean";
+    empty.textContent = searchInput.value
+      ? "No matching files"
+      : workspace.mode === "checkpoint"
+        ? "Nothing since the last review"
+        : "Working tree is clean";
     fileTreeEl.append(empty);
     return;
   }
@@ -461,12 +515,16 @@ function renderTree(): void {
 
 function updateSubmitButton(): void {
   const count = workspace?.pendingFiles.length ?? 0;
-  const writtenCount = comments.filter((comment) => comment.body.trim().length > 0).length;
+  const writtenCount = comments.filter(
+    (comment) => comment.body.trim().length > 0,
+  ).length;
   // A half-typed draft counts too, so the submit button is live while typing.
-  const draftCount = draft != null && draftInput.value.trim().length > 0 ? 1 : 0;
+  const draftCount =
+    draft != null && draftInput.value.trim().length > 0 ? 1 : 0;
   submitButton.disabled = count === 0 && writtenCount === 0 && draftCount === 0;
   const total = writtenCount + draftCount;
-  if (total > 0) submitButton.textContent = `Submit ${total} comment${total === 1 ? "" : "s"} · review ${count}`;
+  if (total > 0)
+    submitButton.textContent = `Submit ${total} comment${total === 1 ? "" : "s"} · review ${count}`;
   else if (count > 0) submitButton.textContent = `Mark ${count} reviewed`;
   else submitButton.textContent = "Mark reviewed";
 }
@@ -474,10 +532,13 @@ function updateSubmitButton(): void {
 function updateHeader(): void {
   if (workspace == null) return;
   repoNameEl.textContent = workspace.repoName;
-  const baseline = workspace.hasCheckpoint && workspace.checkpointCreatedAt
-    ? `reviewed ${ageLabel(workspace.checkpointCreatedAt)}`
-    : "not reviewed yet";
-  repoMetaEl.textContent = [workspace.branch, baseline].filter(Boolean).join(" · ");
+  const baseline =
+    workspace.hasCheckpoint && workspace.checkpointCreatedAt
+      ? `reviewed ${ageLabel(workspace.checkpointCreatedAt)}`
+      : "not reviewed yet";
+  repoMetaEl.textContent = [workspace.branch, baseline]
+    .filter(Boolean)
+    .join(" · ");
   checkpointButton.classList.toggle("active", workspace.mode === "checkpoint");
   headButton.classList.toggle("active", workspace.mode === "head");
 }
@@ -520,11 +581,32 @@ function render(): void {
 
 function inferLanguage(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase();
-  return ({
-    ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
-    json: "json", css: "css", html: "html", htm: "html", md: "markdown", py: "python", rs: "rust",
-    go: "go", java: "java", kt: "kotlin", sh: "shell", bash: "shell", yml: "yaml", yaml: "yaml",
-  } as Record<string, string>)[ext ?? ""] ?? "plaintext";
+  return (
+    (
+      {
+        ts: "typescript",
+        tsx: "typescript",
+        js: "javascript",
+        jsx: "javascript",
+        mjs: "javascript",
+        cjs: "javascript",
+        json: "json",
+        css: "css",
+        html: "html",
+        htm: "html",
+        md: "markdown",
+        py: "python",
+        rs: "rust",
+        go: "go",
+        java: "java",
+        kt: "kotlin",
+        sh: "shell",
+        bash: "shell",
+        yml: "yaml",
+        yaml: "yaml",
+      } as Record<string, string>
+    )[ext ?? ""] ?? "plaintext"
+  );
 }
 
 function clearViewZones(): void {
@@ -532,10 +614,18 @@ function clearViewZones(): void {
   const originalEditor = diffEditor.getOriginalEditor();
   const modifiedEditor = diffEditor.getModifiedEditor();
   originalEditor.changeViewZones((accessor) => {
-    activeViewZones.filter((zone) => zone.editor === originalEditor).forEach((zone) => accessor.removeZone(zone.id));
+    activeViewZones
+      .filter((zone) => zone.editor === originalEditor)
+      .forEach((zone) => {
+        accessor.removeZone(zone.id);
+      });
   });
   modifiedEditor.changeViewZones((accessor) => {
-    activeViewZones.filter((zone) => zone.editor === modifiedEditor).forEach((zone) => accessor.removeZone(zone.id));
+    activeViewZones
+      .filter((zone) => zone.editor === modifiedEditor)
+      .forEach((zone) => {
+        accessor.removeZone(zone.id);
+      });
   });
   activeViewZones = [];
 }
@@ -566,8 +656,15 @@ function mountFile(file: FileContents): void {
   mountedPath = file.path;
   mountedMode = file.mode;
   if (viewStyle === "unified") {
-    unifiedView.mount(file, lineComments(), lineWrapEnabled(), inferLanguage(file.path));
-    unifiedView.restoreScrollTop(unifiedScrollTops.get(scrollKey(file.path, file.mode)) ?? 0);
+    unifiedView.mount(
+      file,
+      lineComments(),
+      lineWrapEnabled(),
+      inferLanguage(file.path),
+    );
+    unifiedView.restoreScrollTop(
+      unifiedScrollTops.get(scrollKey(file.path, file.mode)) ?? 0,
+    );
     restoreFocusedComment(focused);
     return;
   }
@@ -586,7 +683,13 @@ function mountFile(file: FileContents): void {
 function lineComments(): UiComment[] {
   const mode = workspace?.mode;
   if (activePath == null || mode == null) return [];
-  return comments.filter((comment) => comment.path === activePath && comment.mode === mode && comment.side !== "file" && comment.line != null);
+  return comments.filter(
+    (comment) =>
+      comment.path === activePath &&
+      comment.mode === mode &&
+      comment.side !== "file" &&
+      comment.line != null,
+  );
 }
 
 function lineWrapEnabled(): boolean {
@@ -598,7 +701,12 @@ function requestActiveFile(): void {
   const file = mode == null ? null : activeFile();
   if (file == null || file.fingerprint === mountedFingerprint) return;
   activeRequestId = `file:${++requestCounter}`;
-  send({ type: "request-file", requestId: activeRequestId, path: file.path, mode });
+  send({
+    type: "request-file",
+    requestId: activeRequestId,
+    path: file.path,
+    mode,
+  });
 }
 
 function commentLocation(comment: ReviewComment): string {
@@ -616,10 +724,17 @@ function removeComment(id: string): void {
 }
 
 function renderFeedback(): void {
-  const fileComments = comments.filter((comment) => comment.side === "file" && comment.path === activePath && comment.mode === workspace?.mode);
+  const fileComments = comments.filter(
+    (comment) =>
+      comment.side === "file" &&
+      comment.path === activePath &&
+      comment.mode === workspace?.mode,
+  );
   const visible = fileComments.length > 0 || draft != null;
   feedbackPanelEl.classList.toggle("hidden", !visible);
-  feedbackTitleEl.textContent = fileComments.length ? `File notes · ${fileComments.length}` : "File note";
+  feedbackTitleEl.textContent = fileComments.length
+    ? `File notes · ${fileComments.length}`
+    : "File note";
   commentListEl.replaceChildren();
   fileComments.forEach((comment) => {
     const row = document.createElement("div");
@@ -642,7 +757,8 @@ function renderFeedback(): void {
 
   draftRowEl.classList.toggle("hidden", draft == null);
   cancelDraftButton.classList.toggle("hidden", draft == null);
-  if (draft != null) draftLocationEl.textContent = commentLocation({ ...draft, body: "" });
+  if (draft != null)
+    draftLocationEl.textContent = commentLocation({ ...draft, body: "" });
 }
 
 function openFileDraft(): void {
@@ -673,26 +789,56 @@ function cancelDraft(): void {
 }
 
 function renderDecorations(): void {
-  const pathComments = comments.filter((comment) => comment.path === activePath && comment.mode === workspace?.mode && comment.line != null && comment.side !== "file");
-  const original = pathComments.filter((comment) => comment.side === "original").map((comment) => ({
-    range: new monaco.Range(comment.line!, 1, comment.line!, 1),
-    options: { isWholeLine: true, className: "review-comment-line", glyphMarginClassName: "review-comment-glyph" },
-  }));
-  const modified = pathComments.filter((comment) => comment.side === "modified").map((comment) => ({
-    range: new monaco.Range(comment.line!, 1, comment.line!, 1),
-    options: { isWholeLine: true, className: "review-comment-line", glyphMarginClassName: "review-comment-glyph" },
-  }));
-  if (originalModel) originalDecorations = diffEditor.getOriginalEditor().deltaDecorations(originalDecorations, original);
-  if (modifiedModel) modifiedDecorations = diffEditor.getModifiedEditor().deltaDecorations(modifiedDecorations, modified);
+  const pathComments = comments.filter(
+    (comment): comment is UiComment & { line: number } =>
+      comment.path === activePath &&
+      comment.mode === workspace?.mode &&
+      comment.line != null &&
+      comment.side !== "file",
+  );
+  const original = pathComments
+    .filter((comment) => comment.side === "original")
+    .map((comment) => ({
+      range: new monaco.Range(comment.line, 1, comment.line, 1),
+      options: {
+        isWholeLine: true,
+        className: "review-comment-line",
+        glyphMarginClassName: "review-comment-glyph",
+      },
+    }));
+  const modified = pathComments
+    .filter((comment) => comment.side === "modified")
+    .map((comment) => ({
+      range: new monaco.Range(comment.line, 1, comment.line, 1),
+      options: {
+        isWholeLine: true,
+        className: "review-comment-line",
+        glyphMarginClassName: "review-comment-glyph",
+      },
+    }));
+  if (originalModel)
+    originalDecorations = diffEditor
+      .getOriginalEditor()
+      .deltaDecorations(originalDecorations, original);
+  if (modifiedModel)
+    modifiedDecorations = diffEditor
+      .getModifiedEditor()
+      .deltaDecorations(modifiedDecorations, modified);
 }
 
-function sizeInlineComment(container: HTMLElement, editor: monaco.editor.ICodeEditor): void {
+function sizeInlineComment(
+  container: HTMLElement,
+  editor: monaco.editor.ICodeEditor,
+): void {
   const width = editor.getLayoutInfo().contentWidth;
   container.style.width = `${width}px`;
   container.style.maxWidth = `${width}px`;
 }
 
-function inlineCommentElement(comment: UiComment, editor: monaco.editor.ICodeEditor): HTMLElement {
+function inlineCommentElement(
+  comment: UiComment,
+  editor: monaco.editor.ICodeEditor,
+): HTMLElement {
   const container = createInlineCommentElement(comment, {
     onInput: () => updateSubmitButton(),
     onDelete: () => removeComment(comment.id),
@@ -709,17 +855,26 @@ function syncInlineComments(): void {
   }
   const focused = captureFocusedComment();
   clearViewZones();
-  if (!originalModel || !modifiedModel || activePath == null || workspace == null) return;
+  if (
+    !originalModel ||
+    !modifiedModel ||
+    activePath == null ||
+    workspace == null
+  )
+    return;
   const originalEditor = diffEditor.getOriginalEditor();
   const modifiedEditor = diffEditor.getModifiedEditor();
   const inlineComments = lineComments();
   inlineComments.forEach((comment) => {
-    const editor = comment.side === "original" ? originalEditor : modifiedEditor;
-    const maxLine = editor.getModel()?.getLineCount() ?? comment.line!;
+    const line = comment.line;
+    if (line == null) return;
+    const editor =
+      comment.side === "original" ? originalEditor : modifiedEditor;
+    const maxLine = editor.getModel()?.getLineCount() ?? line;
     editor.changeViewZones((accessor) => {
       const domNode = inlineCommentElement(comment, editor);
       const id = accessor.addZone({
-        afterLineNumber: Math.min(comment.line!, maxLine),
+        afterLineNumber: Math.min(line, maxLine),
         heightInPx: 128,
         domNode,
       });
@@ -733,12 +888,29 @@ function syncInlineComments(): void {
 function addInlineComment(side: "original" | "modified", line: number): void {
   const mode = workspace?.mode;
   if (activePath == null || mode == null) return;
-  const existing = comments.find((comment) => comment.path === activePath && comment.mode === mode && comment.side === side && comment.line === line);
+  const existing = comments.find(
+    (comment) =>
+      comment.path === activePath &&
+      comment.mode === mode &&
+      comment.side === side &&
+      comment.line === line,
+  );
   if (existing) {
-    document.querySelector<HTMLTextAreaElement>(`textarea[data-comment-id="${existing.id}"]`)?.focus();
+    document
+      .querySelector<HTMLTextAreaElement>(
+        `textarea[data-comment-id="${existing.id}"]`,
+      )
+      ?.focus();
     return;
   }
-  const created: UiComment = { id: makeCommentId(), path: activePath, mode, side, line, body: "" };
+  const created: UiComment = {
+    id: makeCommentId(),
+    path: activePath,
+    mode,
+    side,
+    line,
+    body: "",
+  };
   comments.push(created);
   renderRecent();
   renderTree();
@@ -747,29 +919,52 @@ function addInlineComment(side: "original" | "modified", line: number): void {
   if (viewStyle === "unified") {
     unifiedView.scrollToComment(side, line);
   } else {
-    const editor = side === "original" ? diffEditor.getOriginalEditor() : diffEditor.getModifiedEditor();
+    const editor =
+      side === "original"
+        ? diffEditor.getOriginalEditor()
+        : diffEditor.getModifiedEditor();
     editor.revealLineInCenter(line);
   }
   // Only a brand-new draft takes focus; zone/row rebuilds never do.
-  document.querySelector<HTMLTextAreaElement>(`textarea[data-comment-id="${created.id}"]`)?.focus();
+  document
+    .querySelector<HTMLTextAreaElement>(
+      `textarea[data-comment-id="${created.id}"]`,
+    )
+    ?.focus();
 }
 
-function installGutterComments(editor: monaco.editor.ICodeEditor, side: "original" | "modified"): void {
+function installGutterComments(
+  editor: monaco.editor.ICodeEditor,
+  side: "original" | "modified",
+): void {
   let hoverDecorations: string[] = [];
   const inGutter = (event: monaco.editor.IEditorMouseEvent): boolean =>
-    event.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS || event.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN;
+    event.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS ||
+    event.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN;
   editor.onMouseMove((event) => {
-    const line = inGutter(event) ? event.target.position?.lineNumber : undefined;
-    hoverDecorations = editor.deltaDecorations(hoverDecorations, line ? [{
-      range: new monaco.Range(line, 1, line, 1),
-      options: { glyphMarginClassName: "review-glyph-plus" },
-    }] : []);
+    const line = inGutter(event)
+      ? event.target.position?.lineNumber
+      : undefined;
+    hoverDecorations = editor.deltaDecorations(
+      hoverDecorations,
+      line
+        ? [
+            {
+              range: new monaco.Range(line, 1, line, 1),
+              options: { glyphMarginClassName: "review-glyph-plus" },
+            },
+          ]
+        : [],
+    );
   });
   editor.onMouseLeave(() => {
     hoverDecorations = editor.deltaDecorations(hoverDecorations, []);
   });
   editor.onMouseDown((event) => {
-    const line = inGutter(event) ? event.target.position?.lineNumber ?? event.target.range?.startLineNumber : undefined;
+    const line = inGutter(event)
+      ? (event.target.position?.lineNumber ??
+        event.target.range?.startLineNumber)
+      : undefined;
     if (line == null) return;
     addInlineComment(side, line);
   });
@@ -779,8 +974,20 @@ const originalEditor = diffEditor.getOriginalEditor();
 const modifiedEditor = diffEditor.getModifiedEditor();
 installGutterComments(originalEditor, "original");
 installGutterComments(modifiedEditor, "modified");
-originalEditor.onDidLayoutChange(() => activeViewZones.filter((zone) => zone.editor === originalEditor).forEach((zone) => sizeInlineComment(zone.domNode, originalEditor)));
-modifiedEditor.onDidLayoutChange(() => activeViewZones.filter((zone) => zone.editor === modifiedEditor).forEach((zone) => sizeInlineComment(zone.domNode, modifiedEditor)));
+originalEditor.onDidLayoutChange(() =>
+  activeViewZones
+    .filter((zone) => zone.editor === originalEditor)
+    .forEach((zone) => {
+      sizeInlineComment(zone.domNode, originalEditor);
+    }),
+);
+modifiedEditor.onDidLayoutChange(() =>
+  activeViewZones
+    .filter((zone) => zone.editor === modifiedEditor)
+    .forEach((zone) => {
+      sizeInlineComment(zone.domNode, modifiedEditor);
+    }),
+);
 
 window.__reviewReceive = (message: HostMessage): void => {
   if (message.type === "workspace") {
@@ -789,14 +996,31 @@ window.__reviewReceive = (message: HostMessage): void => {
     const previousPath = activePath;
     const previousMode = workspace?.mode;
     workspace = message.state;
-    if (pendingOpenPath && workspace.files.some((file) => file.path === pendingOpenPath)) {
+    if (
+      pendingOpenPath &&
+      workspace.files.some((file) => file.path === pendingOpenPath)
+    ) {
       activePath = pendingOpenPath;
       pendingOpenPath = null;
-    } else if (!activePath || !workspace.files.some((file) => file.path === activePath)) {
-      activePath = workspace.recentPaths.find((path) => workspace!.files.some((file) => file.path === path)) ?? workspace.files[0]?.path ?? null;
+    } else if (
+      !activePath ||
+      !workspace.files.some((file) => file.path === activePath)
+    ) {
+      const state = workspace;
+      activePath =
+        state.recentPaths.find((path) =>
+          state.files.some((file) => file.path === path),
+        ) ??
+        state.files[0]?.path ??
+        null;
     }
     const file = activeFile();
-    if (previousPath !== activePath || previousMode !== workspace.mode || file?.fingerprint !== mountedFingerprint) mountedFingerprint = "";
+    if (
+      previousPath !== activePath ||
+      previousMode !== workspace.mode ||
+      file?.fingerprint !== mountedFingerprint
+    )
+      mountedFingerprint = "";
     render();
     requestActiveFile();
     return;
@@ -818,7 +1042,11 @@ window.__reviewReceive = (message: HostMessage): void => {
     renderTree();
     updateSubmitButton();
     syncInlineComments();
-    showToast(message.insertedFeedback ? "Checkpoint saved · feedback inserted into pi" : "Checkpoint saved");
+    showToast(
+      message.insertedFeedback
+        ? "Checkpoint saved · feedback inserted into pi"
+        : "Checkpoint saved",
+    );
   }
 };
 
@@ -830,7 +1058,10 @@ headButton.addEventListener("click", () => {
   saveMountedScroll();
   send({ type: "set-mode", mode: "head" });
 });
-searchInput.addEventListener("input", () => { renderRecent(); renderTree(); });
+searchInput.addEventListener("input", () => {
+  renderRecent();
+  renderTree();
+});
 lineWrapButton.addEventListener("click", () => {
   const enabled = lineWrapButton.getAttribute("aria-pressed") !== "true";
   const wordWrap = enabled ? "on" : "off";
@@ -839,7 +1070,10 @@ lineWrapButton.addEventListener("click", () => {
   lineWrapButton.title = enabled ? "Disable line wrap" : "Enable line wrap";
   // Monaco uses wordWrapOverride1 internally for diffWordWrap. Set the
   // higher-priority override too so both nested editors receive the toggle.
-  diffEditor.updateOptions({ diffWordWrap: wordWrap, wordWrapOverride2: wordWrap });
+  diffEditor.updateOptions({
+    diffWordWrap: wordWrap,
+    wordWrapOverride2: wordWrap,
+  });
   unifiedView.setWrap(enabled);
 });
 fileCommentButton.addEventListener("click", openFileDraft);
@@ -872,7 +1106,12 @@ function setViewStyle(next: ViewStyle): void {
   // Re-enter the mount path so the freshly selected view renders the file that
   // is currently shown. A failed guard (mode switch in flight) leaves state
   // intact; the pending workspace/file cycle re-mounts anyway.
-  if (lastFile != null && lastFile.path === activePath && workspace?.mode === lastFile.mode) mountFile(lastFile);
+  if (
+    lastFile != null &&
+    lastFile.path === activePath &&
+    workspace?.mode === lastFile.mode
+  )
+    mountFile(lastFile);
   render();
 }
 viewUnifiedButton.addEventListener("click", () => setViewStyle("unified"));
@@ -889,7 +1128,11 @@ window.addEventListener("keydown", (event) => {
   }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
     const target = event.target;
-    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement
+    )
+      return;
     if (viewStyle === "unified" && activeFile() != null) {
       event.preventDefault();
       unifiedView.openSearch();

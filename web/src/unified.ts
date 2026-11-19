@@ -1,21 +1,33 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
+import type { FileContents } from "../../src/types.js";
 import {
-  EXPAND_STEP,
+  colorizeSourceFor,
+  type DiffSide,
+  matchesColorizedText,
+  splitAtWordBounds,
+  splitColorizedLines,
+  wordBounds,
+} from "./colorize.js";
+import {
+  captureFocusedComment,
+  createInlineCommentElement,
+  restoreFocusedComment,
+  type UiComment,
+} from "./comment.js";
+import {
   buildDiffModel,
   clampIntervals,
   computeLayout,
-  initialIntervals,
-  revealRange,
-  rowIndexMap,
   type DiffModel,
   type DiffRow,
+  EXPAND_STEP,
   type Interval,
+  initialIntervals,
   type LayoutItem,
+  revealRange,
+  rowIndexMap,
   type WordSpan,
 } from "./diff-model.js";
-import { captureFocusedComment, createInlineCommentElement, restoreFocusedComment, type UiComment } from "./comment.js";
-import { colorizeSourceFor, matchesColorizedText, splitAtWordBounds, splitColorizedLines, wordBounds, type DiffSide } from "./colorize.js";
-import type { FileContents } from "../../src/types.js";
 
 export interface UnifiedHost {
   addComment(side: "original" | "modified", line: number): void;
@@ -39,12 +51,23 @@ const COLORIZE_SIDE_MAX_CHARS = 300_000;
 
 type IdleSchedule = (callback: () => void) => void;
 const scheduleIdle: IdleSchedule = (() => {
-  const ric = (window as Window & { requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number }).requestIdleCallback;
+  const ric = (
+    window as Window & {
+      requestIdleCallback?: (
+        callback: () => void,
+        options?: { timeout: number },
+      ) => number;
+    }
+  ).requestIdleCallback;
   if (ric != null) return (callback) => ric(callback, { timeout: 300 });
   return (callback) => window.setTimeout(callback, 16);
 })();
 
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
+function el<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  className?: string,
+  text?: string,
+): HTMLElementTagNameMap[K] {
   const element = document.createElement(tag);
   if (className) element.className = className;
   if (text != null) element.textContent = text;
@@ -117,12 +140,21 @@ export class UnifiedDiffView {
     const closeButton = el("button", "u-search-button", "×");
     closeButton.type = "button";
     closeButton.title = "Close search (Escape)";
-    this.searchBarEl.append(this.searchInputEl, this.searchCountEl, prevButton, nextButton, closeButton);
+    this.searchBarEl.append(
+      this.searchInputEl,
+      this.searchCountEl,
+      prevButton,
+      nextButton,
+      closeButton,
+    );
     this.container.append(this.scrollEl, this.searchBarEl);
 
     this.searchInputEl.addEventListener("input", () => {
       window.clearTimeout(this.searchTimer);
-      this.searchTimer = window.setTimeout(() => this.setQuery(this.searchInputEl.value), 150);
+      this.searchTimer = window.setTimeout(
+        () => this.setQuery(this.searchInputEl.value),
+        150,
+      );
     });
     this.searchInputEl.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
@@ -139,9 +171,19 @@ export class UnifiedDiffView {
     closeButton.addEventListener("click", () => this.closeSearch());
   }
 
-  mount(file: FileContents, comments: UiComment[], wrap: boolean, language: string): void {
+  mount(
+    file: FileContents,
+    comments: UiComment[],
+    wrap: boolean,
+    language: string,
+  ): void {
     const key = `${file.mode}:${file.path}`;
-    if (this.currentKey === key && this.currentFingerprint === file.fingerprint && this.model != null && !this.model.binary) {
+    if (
+      this.currentKey === key &&
+      this.currentFingerprint === file.fingerprint &&
+      this.model != null &&
+      !this.model.binary
+    ) {
       // Same content is already on screen (view-style round trip): keep DOM,
       // expansion state, and search state; refresh comments and wrap only.
       this.comments = comments;
@@ -160,9 +202,10 @@ export class UnifiedDiffView {
     this.modifiedContent = file.modifiedContent;
     this.model = buildDiffModel(file.originalContent, file.modifiedContent);
     const state = this.states.get(key);
-    const visible = state != null && state.fingerprint === file.fingerprint
-      ? clampIntervals(state.visible, this.model.rows.length)
-      : initialIntervals(this.model);
+    const visible =
+      state != null && state.fingerprint === file.fingerprint
+        ? clampIntervals(state.visible, this.model.rows.length)
+        : initialIntervals(this.model);
     this.states.set(key, { fingerprint: file.fingerprint, visible });
     this.rowByKey = rowIndexMap(this.model.rows);
     this.comments = comments;
@@ -220,7 +263,10 @@ export class UnifiedDiffView {
   // section rendering settle before the final position sticks.
   private scheduleScrollRestore(top: number): void {
     const apply = () => {
-      const max = Math.max(0, this.scrollEl.scrollHeight - this.scrollEl.clientHeight);
+      const max = Math.max(
+        0,
+        this.scrollEl.scrollHeight - this.scrollEl.clientHeight,
+      );
       this.scrollEl.scrollTop = Math.max(0, Math.min(top, max));
     };
     apply();
@@ -237,7 +283,10 @@ export class UnifiedDiffView {
   openSearch(): void {
     if (!this.searchOpen) {
       this.searchOpen = true;
-      this.searchReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      this.searchReturnFocus =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null;
       this.searchBarEl.classList.remove("hidden");
       this.updateSearchCount();
     }
@@ -253,13 +302,14 @@ export class UnifiedDiffView {
     this.setQuery("");
     const returnFocus = this.searchReturnFocus;
     this.searchReturnFocus = null;
-    if (returnFocus != null && returnFocus.isConnected) returnFocus.focus();
+    if (returnFocus?.isConnected) returnFocus.focus();
   }
 
   // --- layout rendering -----------------------------------------------------
 
   private renderHeader(file: FileContents): void {
-    const model = this.model!;
+    const model = this.model;
+    if (model == null) return;
     this.headerEl.replaceChildren();
     const squares = el("span", "u-squares");
     const { additions, deletions } = model.stats;
@@ -267,9 +317,15 @@ export class UnifiedDiffView {
     let green = 0;
     if (total > 0) {
       green = Math.round((5 * additions) / total);
-      green = Math.max(additions > 0 ? 1 : 0, Math.min(deletions > 0 ? 4 : 5, green));
+      green = Math.max(
+        additions > 0 ? 1 : 0,
+        Math.min(deletions > 0 ? 4 : 5, green),
+      );
     }
-    for (let i = 0; i < 5; i += 1) squares.append(el("span", `u-square ${i < green ? "g" : total > 0 ? "r" : "dim"}`));
+    for (let i = 0; i < 5; i += 1)
+      squares.append(
+        el("span", `u-square ${i < green ? "g" : total > 0 ? "r" : "dim"}`),
+      );
     const counts = el("span", "u-counts", `+${additions} −${deletions}`);
     const copy = el("button", "u-copy-path", "Copy path");
     copy.type = "button";
@@ -298,7 +354,8 @@ export class UnifiedDiffView {
   }
 
   private visibleIntervals(): Interval[] {
-    return this.states.get(this.currentKey!)?.visible ?? [];
+    const key = this.currentKey;
+    return key != null ? (this.states.get(key)?.visible ?? []) : [];
   }
 
   private renderItems(): void {
@@ -306,13 +363,28 @@ export class UnifiedDiffView {
     if (model == null || this.currentKey == null) return;
     const generation = this.generation;
     const commentRows = this.commentRowIndexes();
-    const items: LayoutItem[] = computeLayout(model.rows, this.visibleIntervals(), commentRows, this.language);
+    const items: LayoutItem[] = computeLayout(
+      model.rows,
+      this.visibleIntervals(),
+      commentRows,
+      this.language,
+    );
     const fragment = document.createDocumentFragment();
     for (const item of items) {
-      fragment.append(item.kind === "hunk" ? this.buildHunk(item, generation, commentRows) : this.buildGap(item));
+      fragment.append(
+        item.kind === "hunk"
+          ? this.buildHunk(item, model, generation, commentRows)
+          : this.buildGap(item),
+      );
     }
     if (items.length === 0) {
-      fragment.append(el("div", "u-placeholder", model.binary ? "No text content (binary file)" : "No textual changes"));
+      fragment.append(
+        el(
+          "div",
+          "u-placeholder",
+          model.binary ? "No text content (binary file)" : "No textual changes",
+        ),
+      );
     }
     this.itemsEl.replaceChildren(fragment);
     // Rebuilding the sections detaches any rendered comment rows; re-attach
@@ -328,25 +400,55 @@ export class UnifiedDiffView {
     restoreFocusedComment(focused);
   }
 
-  private buildHunk(item: Extract<LayoutItem, { kind: "hunk" }>, generation: number, commentRows: ReadonlySet<number>): HTMLElement {
+  private buildHunk(
+    item: Extract<LayoutItem, { kind: "hunk" }>,
+    model: DiffModel,
+    generation: number,
+    commentRows: ReadonlySet<number>,
+  ): HTMLElement {
     const section = el("section", "u-hunk");
     section.style.containIntrinsicSize = `auto ${(item.end - item.start) * LINE_HEIGHT + LINE_HEIGHT}px`;
     section.append(el("div", "u-hunk-header", item.header));
-    for (let i = item.start; i < item.end; i += 1) section.append(this.buildRow(i, generation, commentRows));
+    for (let i = item.start; i < item.end; i += 1)
+      section.append(this.buildRow(i, model, generation, commentRows));
     return section;
   }
 
   private buildGap(item: Extract<LayoutItem, { kind: "gap" }>): HTMLElement {
     const gap = el("div", "u-gap");
     const count = item.end - item.start;
-    gap.append(el("span", "u-gap-label", `⋯ ${count} unchanged line${count === 1 ? "" : "s"} ⋅`));
-    if (item.above) gap.append(this.expandButton(`Expand ${EXPAND_STEP} lines above`, "↑", () => this.expandGap(item.start, EXPAND_STEP)));
-    if (item.below) gap.append(this.expandButton(`Expand ${EXPAND_STEP} lines below`, "↓", () => this.expandGap(item.end - Math.min(EXPAND_STEP, count), EXPAND_STEP)));
-    gap.append(this.expandButton(`Expand all ${count} lines`, "⇊", () => this.expandGap(item.start, count)));
+    gap.append(
+      el(
+        "span",
+        "u-gap-label",
+        `⋯ ${count} unchanged line${count === 1 ? "" : "s"} ⋅`,
+      ),
+    );
+    if (item.above)
+      gap.append(
+        this.expandButton(`Expand ${EXPAND_STEP} lines above`, "↑", () =>
+          this.expandGap(item.start, EXPAND_STEP),
+        ),
+      );
+    if (item.below)
+      gap.append(
+        this.expandButton(`Expand ${EXPAND_STEP} lines below`, "↓", () =>
+          this.expandGap(item.end - Math.min(EXPAND_STEP, count), EXPAND_STEP),
+        ),
+      );
+    gap.append(
+      this.expandButton(`Expand all ${count} lines`, "⇊", () =>
+        this.expandGap(item.start, count),
+      ),
+    );
     return gap;
   }
 
-  private expandButton(title: string, label: string, onClick: () => void): HTMLButtonElement {
+  private expandButton(
+    title: string,
+    label: string,
+    onClick: () => void,
+  ): HTMLButtonElement {
     const button = el("button", "u-expand", label);
     button.type = "button";
     button.title = title;
@@ -355,45 +457,73 @@ export class UnifiedDiffView {
   }
 
   private expandGap(start: number, count: number): void {
-    if (this.currentKey == null || this.model == null) return;
-    const state = this.states.get(this.currentKey)!;
-    state.visible = revealRange(state.visible, start, count, this.model.rows.length);
+    const key = this.currentKey;
+    if (key == null || this.model == null) return;
+    const state = this.states.get(key);
+    if (state == null) return;
+    state.visible = revealRange(
+      state.visible,
+      start,
+      count,
+      this.model.rows.length,
+    );
     this.renderItemsPreserving();
   }
 
-  private buildRow(index: number, generation: number, commentRows: ReadonlySet<number>): HTMLElement {
-    const row = this.model!.rows[index];
+  private buildRow(
+    index: number,
+    model: DiffModel,
+    generation: number,
+    commentRows: ReadonlySet<number>,
+  ): HTMLElement {
+    const row = model.rows[index];
     const wrap = el("div", `u-row u-${row.type}`);
     wrap.dataset.idx = String(index);
     const main = el("div", "u-row-main");
     const gutter = el("div", "u-gutter");
     // Single line-number column: current line for context/additions, the old
     // number (red-tinted) for deletions. Clicks keep their respective side.
+    const oldLine = row.oldLine;
+    const newLine = row.newLine;
     const lno = el("span", "u-lno");
     if (row.type === "del") {
       lno.classList.add("u-lno-old");
-      lno.textContent = String(row.oldLine);
-      lno.title = `Comment on reviewed line ${row.oldLine}`;
-      lno.addEventListener("click", () => this.host.addComment("original", row.oldLine!));
+      lno.textContent = String(oldLine);
+      lno.title = `Comment on reviewed line ${oldLine}`;
+      lno.addEventListener("click", () => {
+        if (oldLine != null) this.host.addComment("original", oldLine);
+      });
     } else {
-      lno.textContent = String(row.newLine);
-      lno.title = `Comment on current line ${row.newLine}`;
-      lno.addEventListener("click", () => this.host.addComment("modified", row.newLine!));
+      lno.textContent = String(newLine);
+      lno.title = `Comment on current line ${newLine}`;
+      lno.addEventListener("click", () => {
+        if (newLine != null) this.host.addComment("modified", newLine);
+      });
     }
     gutter.append(lno);
-    const sign = el("span", "u-sign", row.type === "add" ? "+" : row.type === "del" ? "-" : "\u00a0");
+    const sign = el(
+      "span",
+      "u-sign",
+      row.type === "add" ? "+" : row.type === "del" ? "-" : "\u00a0",
+    );
     const code = el("code", "u-code");
     this.renderRowContent(code, row, generation);
     main.append(gutter, sign, code);
     wrap.append(main);
-    if (this.model!.oldNoEol && row.oldLine === this.model!.oldLastLine) wrap.append(el("div", "u-noeol", "\\ No newline at end of file"));
-    else if (this.model!.newNoEol && row.newLine === this.model!.newLastLine) wrap.append(el("div", "u-noeol", "\\ No newline at end of file"));
+    if (model.oldNoEol && oldLine === model.oldLastLine)
+      wrap.append(el("div", "u-noeol", "\\ No newline at end of file"));
+    else if (model.newNoEol && newLine === model.newLastLine)
+      wrap.append(el("div", "u-noeol", "\\ No newline at end of file"));
     if (commentRows.has(index)) wrap.classList.add("commented");
     if (this.markedRows.has(index)) wrap.classList.add("u-match");
     return wrap;
   }
 
-  private renderRowContent(code: HTMLElement, row: DiffRow, generation: number): void {
+  private renderRowContent(
+    code: HTMLElement,
+    row: DiffRow,
+    generation: number,
+  ): void {
     code.replaceChildren();
     if (this.searchQuery && row.text.toLowerCase().includes(this.searchQuery)) {
       const text = row.text;
@@ -402,20 +532,27 @@ export class UnifiedDiffView {
       while (true) {
         const hit = lower.indexOf(this.searchQuery, cursor);
         if (hit < 0) break;
-        if (hit > cursor) code.append(el("span", undefined, text.slice(cursor, hit)));
-        code.append(el("mark", undefined, text.slice(hit, hit + this.searchQuery.length)));
+        if (hit > cursor)
+          code.append(el("span", undefined, text.slice(cursor, hit)));
+        code.append(
+          el("mark", undefined, text.slice(hit, hit + this.searchQuery.length)),
+        );
         cursor = hit + this.searchQuery.length;
       }
-      if (cursor < text.length) code.append(el("span", undefined, text.slice(cursor)));
+      if (cursor < text.length)
+        code.append(el("span", undefined, text.slice(cursor)));
       this.appendTruncationMarker(code, row);
       return;
     }
     if (row.spans != null) {
       const spans = row.spans;
-      for (const span of spans) code.append(el("span", `u-w-${span.kind}`, span.text));
+      for (const span of spans)
+        code.append(el("span", `u-w-${span.kind}`, span.text));
       // Upgrade the plain paint to syntax-colored tokens with the word-diff
       // boxes re-applied; it stays as the fallback when colorize is missing.
-      this.queueColorize(code, row, generation, (html) => this.mergeWordDiffBoxes(html, spans));
+      this.queueColorize(code, row, generation, (html) =>
+        this.mergeWordDiffBoxes(html, spans),
+      );
       return;
     }
     // Truncation markers must survive colorize, which replaces the text span's
@@ -439,7 +576,8 @@ export class UnifiedDiffView {
   private wantedLineComments(): Map<string, UiComment> {
     const wanted = new Map<string, UiComment>();
     for (const comment of this.comments) {
-      if (comment.side !== "file" && comment.line != null) wanted.set(comment.id, comment);
+      if (comment.side !== "file" && comment.line != null)
+        wanted.set(comment.id, comment);
     }
     return wanted;
   }
@@ -468,7 +606,8 @@ export class UnifiedDiffView {
     // renders (comments are a render-time union over the visible intervals).
     const hiddenTarget = [...wanted.keys()].some((id) => {
       if (this.renderedComments.has(id)) return false;
-      const comment = wanted.get(id)!;
+      const comment = wanted.get(id);
+      if (comment == null) return false;
       const rowIdx = this.rowByKey.get(`${comment.side}:${comment.line}`);
       return rowIdx != null && this.rowElement(rowIdx) == null;
     });
@@ -492,7 +631,7 @@ export class UnifiedDiffView {
       if (rowIdx == null) continue;
       highlighted.add(rowIdx);
       const existing = this.renderedComments.get(comment.id);
-      if (existing != null && existing.isConnected) continue;
+      if (existing?.isConnected) continue;
       const rowEl = this.rowElement(rowIdx);
       if (rowEl == null) continue;
       const element = createInlineCommentElement(comment, {
@@ -504,12 +643,17 @@ export class UnifiedDiffView {
       this.renderedComments.set(comment.id, element);
     }
     for (const rowEl of this.itemsEl.querySelectorAll<HTMLElement>(".u-row")) {
-      rowEl.classList.toggle("commented", highlighted.has(Number(rowEl.dataset.idx)));
+      rowEl.classList.toggle(
+        "commented",
+        highlighted.has(Number(rowEl.dataset.idx)),
+      );
     }
   }
 
   private rowElement(index: number): HTMLElement | null {
-    return this.itemsEl.querySelector<HTMLElement>(`.u-row[data-idx="${index}"]`);
+    return this.itemsEl.querySelector<HTMLElement>(
+      `.u-row[data-idx="${index}"]`,
+    );
   }
 
   // --- syntax coloring ------------------------------------------------------
@@ -522,7 +666,12 @@ export class UnifiedDiffView {
   // `decorate` reworks colorized line HTML before it lands in the row (used to
   // re-apply word-diff boxes on token spans); when it returns null the row
   // keeps whatever is already painted there.
-  private queueColorize(code: HTMLElement, row: DiffRow, generation: number, decorate?: (html: string) => DocumentFragment | null): void {
+  private queueColorize(
+    code: HTMLElement,
+    row: DiffRow,
+    generation: number,
+    decorate?: (html: string) => DocumentFragment | null,
+  ): void {
     if (this.language === "plaintext" || !row.text.trim()) return;
     const apply = (html: string) => {
       if (decorate == null) {
@@ -536,23 +685,32 @@ export class UnifiedDiffView {
     // row can be re-rendered in place between the two (same element, same
     // generation), and a then-fresh search highlight must not be overwritten.
     const stale = () =>
-      generation !== this.generation || !code.isConnected
-      || (this.searchQuery !== "" && row.text.toLowerCase().includes(this.searchQuery));
-    const source = row.fullLength == null
-      ? colorizeSourceFor(row, {
-        original: this.originalContent.length <= COLORIZE_SIDE_MAX_CHARS,
-        modified: this.modifiedContent.length <= COLORIZE_SIDE_MAX_CHARS,
-      })
-      : null;
+      generation !== this.generation ||
+      !code.isConnected ||
+      (this.searchQuery !== "" &&
+        row.text.toLowerCase().includes(this.searchQuery));
+    const source =
+      row.fullLength == null
+        ? colorizeSourceFor(row, {
+            original: this.originalContent.length <= COLORIZE_SIDE_MAX_CHARS,
+            modified: this.modifiedContent.length <= COLORIZE_SIDE_MAX_CHARS,
+          })
+        : null;
     if (source != null) {
-      const content = source.side === "original" ? this.originalContent : this.modifiedContent;
+      const content =
+        source.side === "original"
+          ? this.originalContent
+          : this.modifiedContent;
       this.idle(() => {
         if (stale()) return;
-        void this.sideLinesFor(source.side, content).then((lines) => {
-          if (stale()) return;
-          const html = lines[source.line - 1];
-          if (html) apply(html);
-        }, () => {});
+        void this.sideLinesFor(source.side, content).then(
+          (lines) => {
+            if (stale()) return;
+            const html = lines[source.line - 1];
+            if (html) apply(html);
+          },
+          () => {},
+        );
       });
       return;
     }
@@ -560,11 +718,14 @@ export class UnifiedDiffView {
     const promise = this.colorizePromise(row.text);
     this.idle(() => {
       if (stale()) return;
-      void promise.then((html) => {
-        if (stale()) return;
-        if (!html) return;
-        apply(stripTrailingBr(html));
-      }, () => {});
+      void promise.then(
+        (html) => {
+          if (stale()) return;
+          if (!html) return;
+          apply(stripTrailingBr(html));
+        },
+        () => {},
+      );
     });
   }
 
@@ -574,26 +735,48 @@ export class UnifiedDiffView {
   // match the spans' text at its offset — monaco's space→no-break-space
   // substitution is tolerated, tab expansion and stale side content are not
   // (the plain word-diff paint then stays).
-  private mergeWordDiffBoxes(html: string, spans: readonly WordSpan[]): DocumentFragment | null {
+  private mergeWordDiffBoxes(
+    html: string,
+    spans: readonly WordSpan[],
+  ): DocumentFragment | null {
     const text = spans.map((span) => span.text).join("");
     const bounds = wordBounds(spans);
     if (bounds.length === 0) return null;
     const template = document.createElement("template");
     template.innerHTML = html;
-    const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(
+      template.content,
+      NodeFilter.SHOW_TEXT,
+    );
     const nodes: Text[] = [];
-    for (let node = walker.nextNode(); node != null; node = walker.nextNode()) nodes.push(node as Text);
+    for (let node = walker.nextNode(); node != null; node = walker.nextNode())
+      nodes.push(node as Text);
     let offset = 0;
     let boundIndex = 0;
     for (const textNode of nodes) {
-      if (!matchesColorizedText(textNode.data, text.slice(offset, offset + textNode.data.length))) return null;
-      const { pieces, nextIndex } = splitAtWordBounds(textNode.data, offset, bounds, boundIndex);
+      if (
+        !matchesColorizedText(
+          textNode.data,
+          text.slice(offset, offset + textNode.data.length),
+        )
+      )
+        return null;
+      const { pieces, nextIndex } = splitAtWordBounds(
+        textNode.data,
+        offset,
+        bounds,
+        boundIndex,
+      );
       boundIndex = nextIndex;
       offset += textNode.data.length;
       if (pieces.length === 1 && pieces[0].className == null) continue;
       const fragment = document.createDocumentFragment();
       for (const piece of pieces) {
-        fragment.append(piece.className == null ? document.createTextNode(piece.text) : el("span", piece.className, piece.text));
+        fragment.append(
+          piece.className == null
+            ? document.createTextNode(piece.text)
+            : el("span", piece.className, piece.text),
+        );
       }
       textNode.parentNode?.replaceChild(fragment, textNode);
     }
@@ -608,7 +791,10 @@ export class UnifiedDiffView {
   private sideLinesFor(side: DiffSide, content: string): Promise<string[]> {
     let promise = this.sideLineHtml.get(side);
     if (promise == null) {
-      promise = monaco.editor.colorize(content, this.language, { tabSize: 4 }).then(splitColorizedLines).catch(() => []);
+      promise = monaco.editor
+        .colorize(content, this.language, { tabSize: 4 })
+        .then(splitColorizedLines)
+        .catch(() => []);
       this.sideLineHtml.set(side, promise);
     }
     return promise;
@@ -618,7 +804,9 @@ export class UnifiedDiffView {
     const key = `${this.language}\u0000${text}`;
     let promise = this.colorizeCache.get(key);
     if (promise == null) {
-      promise = monaco.editor.colorize(text, this.language, { tabSize: 4 }).catch(() => "");
+      promise = monaco.editor
+        .colorize(text, this.language, { tabSize: 4 })
+        .catch(() => "");
       this.colorizeCache.set(key, promise);
     }
     // Single global budget, oldest-first eviction — one language cannot hold
@@ -636,7 +824,8 @@ export class UnifiedDiffView {
     if (this.colorizeDraining) return;
     this.colorizeDraining = true;
     const drain = () => {
-      for (const queued of this.colorizeQueue.splice(0, COLORIZE_BATCH)) queued();
+      for (const queued of this.colorizeQueue.splice(0, COLORIZE_BATCH))
+        queued();
       if (this.colorizeQueue.length > 0) scheduleIdle(drain);
       else this.colorizeDraining = false;
     };
@@ -661,7 +850,8 @@ export class UnifiedDiffView {
     this.searchCurrent = 0;
     if (model != null && this.searchQuery) {
       for (let i = 0; i < model.rows.length; i += 1) {
-        if (model.rows[i].text.toLowerCase().includes(this.searchQuery)) this.searchMatches.push(i);
+        if (model.rows[i].text.toLowerCase().includes(this.searchQuery))
+          this.searchMatches.push(i);
       }
     }
     // Every match gets the row highlight class (buildRow consults this set for
@@ -672,12 +862,18 @@ export class UnifiedDiffView {
     // broad queries from exploding the layout).
     let revealed = false;
     let revealCount = 0;
+    const key = this.currentKey;
     for (const index of this.searchMatches) {
       if (revealCount >= SEARCH_REVEAL_CAP) break;
       if (this.rowElement(index) != null) continue;
-      const state = this.states.get(this.currentKey!);
+      const state = key != null ? this.states.get(key) : undefined;
       if (state != null && model != null) {
-        state.visible = revealRange(state.visible, Math.max(0, index - 3), 7, model.rows.length);
+        state.visible = revealRange(
+          state.visible,
+          Math.max(0, index - 3),
+          7,
+          model.rows.length,
+        );
         revealed = true;
       }
       revealCount += 1;
@@ -692,7 +888,8 @@ export class UnifiedDiffView {
       rowEl.classList.remove("u-match-current");
       const code = rowEl.querySelector<HTMLElement>(".u-code");
       const row = model?.rows[index];
-      if (code != null && row != null) this.renderRowContent(code, row, this.generation);
+      if (code != null && row != null)
+        this.renderRowContent(code, row, this.generation);
     }
     this.updateSearchCount();
   }
@@ -709,8 +906,10 @@ export class UnifiedDiffView {
   private stepSearch(direction: 1 | -1): void {
     const matches = this.visibleMatchIndexes();
     if (matches.length === 0) return;
-    this.searchCurrent = (this.searchCurrent + direction + matches.length) % matches.length;
-    for (const index of matches) this.rowElement(index)?.classList.remove("u-match-current");
+    this.searchCurrent =
+      (this.searchCurrent + direction + matches.length) % matches.length;
+    for (const index of matches)
+      this.rowElement(index)?.classList.remove("u-match-current");
     const current = matches[this.searchCurrent];
     const currentEl = this.rowElement(current);
     currentEl?.classList.add("u-match-current");
@@ -721,7 +920,10 @@ export class UnifiedDiffView {
   private updateSearchCount(): void {
     const visible = this.searchQuery ? this.visibleMatchIndexes().length : 0;
     const hidden = this.searchMatches.length - visible;
-    const current = visible > 0 ? Math.min(this.searchCurrent, visible - 1) + 1 : 0;
-    this.searchCountEl.textContent = this.searchQuery ? `${current}/${visible}${hidden > 0 ? ` (${hidden} hidden)` : ""}` : "";
+    const current =
+      visible > 0 ? Math.min(this.searchCurrent, visible - 1) + 1 : 0;
+    this.searchCountEl.textContent = this.searchQuery
+      ? `${current}/${visible}${hidden > 0 ? ` (${hidden} hidden)` : ""}`
+      : "";
   }
 }

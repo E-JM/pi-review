@@ -20,5 +20,8 @@ declare module "glimpseui" {
     loadFile(path: string): void;
   }
 
-  export function open(html: string, options?: GlimpseOpenOptions): GlimpseWindow;
+  export function open(
+    html: string,
+    options?: GlimpseOpenOptions,
+  ): GlimpseWindow;
 }

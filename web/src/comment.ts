@@ -15,13 +15,19 @@ export function commentSideLabel(comment: ReviewComment): string {
 // Shared by the Monaco view zones and the unified view's DOM rows. The caller
 // owns sizing and focus (via the data-comment-id contract): the factory never
 // focuses on its own, so rebuilds and re-attaches never steal focus.
-export function createInlineCommentElement(comment: UiComment, callbacks: InlineCommentCallbacks): HTMLElement {
+export function createInlineCommentElement(
+  comment: UiComment,
+  callbacks: InlineCommentCallbacks,
+): HTMLElement {
   const container = document.createElement("div");
   container.className = "inline-comment";
   const header = document.createElement("div");
   header.className = "inline-comment-header";
   const title = document.createElement("strong");
-  title.textContent = comment.line == null ? commentSideLabel(comment) : `${commentSideLabel(comment)} line ${comment.line}`;
+  title.textContent =
+    comment.line == null
+      ? commentSideLabel(comment)
+      : `${commentSideLabel(comment)} line ${comment.line}`;
   const remove = document.createElement("button");
   remove.textContent = "Delete";
   remove.addEventListener("click", callbacks.onDelete);
@@ -37,8 +43,10 @@ export function createInlineCommentElement(comment: UiComment, callbacks: Inline
     callbacks.onInput();
   });
   textarea.addEventListener("keydown", (event) => {
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") textarea.blur();
-    if (event.key === "Escape" && comment.body.trim().length === 0) callbacks.onDelete();
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter")
+      textarea.blur();
+    if (event.key === "Escape" && comment.body.trim().length === 0)
+      callbacks.onDelete();
   });
   container.append(header, textarea);
   return container;
@@ -55,13 +63,23 @@ export interface FocusedComment {
 
 export function captureFocusedComment(): FocusedComment | null {
   const active = document.activeElement;
-  if (!(active instanceof HTMLTextAreaElement) || active.dataset.commentId == null) return null;
-  return { id: active.dataset.commentId, start: active.selectionStart ?? 0, end: active.selectionEnd ?? 0 };
+  if (
+    !(active instanceof HTMLTextAreaElement) ||
+    active.dataset.commentId == null
+  )
+    return null;
+  return {
+    id: active.dataset.commentId,
+    start: active.selectionStart ?? 0,
+    end: active.selectionEnd ?? 0,
+  };
 }
 
 export function restoreFocusedComment(capture: FocusedComment | null): void {
   if (capture == null) return;
-  const textarea = document.querySelector<HTMLTextAreaElement>(`textarea[data-comment-id="${CSS.escape(capture.id)}"]`);
+  const textarea = document.querySelector<HTMLTextAreaElement>(
+    `textarea[data-comment-id="${CSS.escape(capture.id)}"]`,
+  );
   if (textarea != null) {
     textarea.focus();
     textarea.setSelectionRange(capture.start, capture.end);

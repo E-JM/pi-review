@@ -37,7 +37,11 @@ export function wordBounds(spans: readonly WordSpanLike[]): WordBound[] {
   let cursor = 0;
   for (const span of spans) {
     if (span.kind !== "equal" && span.text.length > 0) {
-      bounds.push({ start: cursor, end: cursor + span.text.length, className: `u-w-${span.kind}` });
+      bounds.push({
+        start: cursor,
+        end: cursor + span.text.length,
+        className: `u-w-${span.kind}`,
+      });
     }
     cursor += span.text.length;
   }
@@ -49,14 +53,22 @@ export function wordBounds(spans: readonly WordSpanLike[]): WordBound[] {
 // could overlap it. Piece texts concatenate back to `value`; pieces inside a
 // changed fragment carry its box class. Every loop step consumes text or a
 // bound, so degenerate bounds cannot stall the split.
-export function splitAtWordBounds(value: string, offset: number, bounds: readonly WordBound[], startIndex: number): { pieces: WordPiece[]; nextIndex: number } {
+export function splitAtWordBounds(
+  value: string,
+  offset: number,
+  bounds: readonly WordBound[],
+  startIndex: number,
+): { pieces: WordPiece[]; nextIndex: number } {
   const pieces: WordPiece[] = [];
   let index = startIndex;
   let local = 0;
   while (local < value.length) {
     const bound = bounds[index];
     if (bound == null || offset + local < bound.start) {
-      const end = bound == null ? value.length : Math.min(value.length, local + bound.start - (offset + local));
+      const end =
+        bound == null
+          ? value.length
+          : Math.min(value.length, local + bound.start - (offset + local));
       pieces.push({ text: value.slice(local, end), className: null });
       local = end;
       continue;
@@ -77,7 +89,10 @@ export function splitAtWordBounds(value: string, offset: number, bounds: readonl
 // Monaco renders plain spaces as no-break spaces, one for one, so those two
 // count as equal; anything else — tabs (which it expands to runs of no-break
 // spaces, shifting offsets) or stale side content — fails the match.
-export function matchesColorizedText(actual: string, expected: string): boolean {
+export function matchesColorizedText(
+  actual: string,
+  expected: string,
+): boolean {
   if (actual.length !== expected.length) return false;
   for (let i = 0; i < actual.length; i += 1) {
     const a = actual.charCodeAt(i);
@@ -92,15 +107,24 @@ export function matchesColorizedText(actual: string, expected: string): boolean 
 // Which file side supplies a row's stateful colorization. Additions exist only
 // in the modified file and deletions only in the original; equal rows exist in
 // both and prefer whichever side is colorizable (their contents are identical).
-export function colorizeSourceFor(row: ColorizableRow, eligible: SideEligibility): { side: DiffSide; line: number } | null {
+export function colorizeSourceFor(
+  row: ColorizableRow,
+  eligible: SideEligibility,
+): { side: DiffSide; line: number } | null {
   if (row.type === "del") {
-    return eligible.original && row.oldLine != null ? { side: "original", line: row.oldLine } : null;
+    return eligible.original && row.oldLine != null
+      ? { side: "original", line: row.oldLine }
+      : null;
   }
   if (row.type === "add") {
-    return eligible.modified && row.newLine != null ? { side: "modified", line: row.newLine } : null;
+    return eligible.modified && row.newLine != null
+      ? { side: "modified", line: row.newLine }
+      : null;
   }
-  if (eligible.modified && row.newLine != null) return { side: "modified", line: row.newLine };
-  if (eligible.original && row.oldLine != null) return { side: "original", line: row.oldLine };
+  if (eligible.modified && row.newLine != null)
+    return { side: "modified", line: row.newLine };
+  if (eligible.original && row.oldLine != null)
+    return { side: "original", line: row.oldLine };
   return null;
 }
 

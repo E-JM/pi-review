@@ -11,5 +11,10 @@
     "types": ["node"],
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["src/**/*.ts", "web/src/**/*.ts", "types/**/*.d.ts", "test/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "web/src/**/*.ts",
+    "types/**/*.d.ts",
+    "test/**/*.ts"
+  ]
 }

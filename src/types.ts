@@ -70,4 +70,8 @@ export type HostMessage =
   | { type: "workspace"; state: WorkspaceState }
   | { type: "file"; requestId: string; file: FileContents }
   | { type: "file-error"; requestId: string; message: string }
-  | { type: "review-submitted"; checkpointAt: number; insertedFeedback: boolean };
+  | {
+      type: "review-submitted";
+      checkpointAt: number;
+      insertedFeedback: boolean;
+    };

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import { gzipSync, gunzipSync } from "node:zlib";
 import { basename, dirname, join } from "node:path";
+import { gunzipSync, gzipSync } from "node:zlib";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ChangeStatus, ReviewCheckpoint, StoredFile } from "./types.js";
 
@@ -13,11 +13,20 @@ export interface FilePair {
   modifiedContent: string;
 }
 
-async function git(pi: ExtensionAPI, cwd: string, args: string[], allowFailure = false): Promise<string> {
+async function git(
+  pi: ExtensionAPI,
+  cwd: string,
+  args: string[],
+  allowFailure = false,
+): Promise<string> {
   const result = await pi.exec("git", args, { cwd });
   if (result.code !== 0) {
     if (allowFailure) return "";
-    throw new Error(result.stderr.trim() || result.stdout.trim() || `git ${args.join(" ")} failed`);
+    throw new Error(
+      result.stderr.trim() ||
+        result.stdout.trim() ||
+        `git ${args.join(" ")} failed`,
+    );
   }
   return result.stdout;
 }
@@ -26,18 +35,31 @@ function splitZero(value: string): string[] {
   return value.split("\0").filter(Boolean);
 }
 
-export async function getRepoRoot(pi: ExtensionAPI, cwd: string): Promise<string> {
+export async function getRepoRoot(
+  pi: ExtensionAPI,
+  cwd: string,
+): Promise<string> {
   const root = await git(pi, cwd, ["rev-parse", "--show-toplevel"]);
   return root.trim();
 }
 
-export async function getHeadSha(pi: ExtensionAPI, repoRoot: string): Promise<string | null> {
-  const sha = (await git(pi, repoRoot, ["rev-parse", "--verify", "HEAD"], true)).trim();
+export async function getHeadSha(
+  pi: ExtensionAPI,
+  repoRoot: string,
+): Promise<string | null> {
+  const sha = (
+    await git(pi, repoRoot, ["rev-parse", "--verify", "HEAD"], true)
+  ).trim();
   return sha || null;
 }
 
-export async function getBranchName(pi: ExtensionAPI, repoRoot: string): Promise<string | null> {
-  const branch = (await git(pi, repoRoot, ["branch", "--show-current"], true)).trim();
+export async function getBranchName(
+  pi: ExtensionAPI,
+  repoRoot: string,
+): Promise<string | null> {
+  const branch = (
+    await git(pi, repoRoot, ["branch", "--show-current"], true)
+  ).trim();
   return branch || null;
 }
 
@@ -61,25 +83,67 @@ export function parsePorcelainPaths(output: string): string[] {
   return [...new Set(paths)];
 }
 
-async function dirtyPaths(pi: ExtensionAPI, repoRoot: string): Promise<string[]> {
-  const output = await git(pi, repoRoot, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+async function dirtyPaths(
+  pi: ExtensionAPI,
+  repoRoot: string,
+): Promise<string[]> {
+  const output = await git(pi, repoRoot, [
+    "status",
+    "--porcelain=v1",
+    "-z",
+    "--untracked-files=all",
+  ]);
   return parsePorcelainPaths(output);
 }
 
-async function untrackedPaths(pi: ExtensionAPI, repoRoot: string): Promise<string[]> {
-  return splitZero(await git(pi, repoRoot, ["ls-files", "--others", "--exclude-standard", "-z"], true));
+async function untrackedPaths(
+  pi: ExtensionAPI,
+  repoRoot: string,
+): Promise<string[]> {
+  return splitZero(
+    await git(
+      pi,
+      repoRoot,
+      ["ls-files", "--others", "--exclude-standard", "-z"],
+      true,
+    ),
+  );
 }
 
-async function currentPaths(pi: ExtensionAPI, repoRoot: string): Promise<string[]> {
-  return splitZero(await git(pi, repoRoot, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], true));
+async function currentPaths(
+  pi: ExtensionAPI,
+  repoRoot: string,
+): Promise<string[]> {
+  return splitZero(
+    await git(
+      pi,
+      repoRoot,
+      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      true,
+    ),
+  );
 }
 
-async function changedAgainst(pi: ExtensionAPI, repoRoot: string, revision: string | null): Promise<string[]> {
+async function changedAgainst(
+  pi: ExtensionAPI,
+  repoRoot: string,
+  revision: string | null,
+): Promise<string[]> {
   if (revision == null) return currentPaths(pi, repoRoot);
-  return splitZero(await git(pi, repoRoot, ["diff", "--name-only", "-z", revision, "--"], true));
+  return splitZero(
+    await git(
+      pi,
+      repoRoot,
+      ["diff", "--name-only", "-z", revision, "--"],
+      true,
+    ),
+  );
 }
 
-async function readCurrent(repoRoot: string, path: string): Promise<string | null> {
+async function readCurrent(
+  repoRoot: string,
+  path: string,
+): Promise<string | null> {
   const absolute = join(repoRoot, path);
   try {
     const info = await stat(absolute);
@@ -90,9 +154,16 @@ async function readCurrent(repoRoot: string, path: string): Promise<string | nul
   }
 }
 
-async function readRevision(pi: ExtensionAPI, repoRoot: string, revision: string | null, path: string): Promise<string | null> {
+async function readRevision(
+  pi: ExtensionAPI,
+  repoRoot: string,
+  revision: string | null,
+  path: string,
+): Promise<string | null> {
   if (revision == null) return null;
-  const result = await pi.exec("git", ["show", `${revision}:${path}`], { cwd: repoRoot });
+  const result = await pi.exec("git", ["show", `${revision}:${path}`], {
+    cwd: repoRoot,
+  });
   return result.code === 0 ? result.stdout : null;
 }
 
@@ -101,7 +172,10 @@ export function fingerprint(content: string | null): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-function statusFor(original: string | null, modified: string | null): ChangeStatus {
+function statusFor(
+  original: string | null,
+  modified: string | null,
+): ChangeStatus {
   if (original == null) return "added";
   if (modified == null) return "deleted";
   return "modified";
@@ -129,7 +203,9 @@ async function baselineContent(
   path: string,
 ): Promise<string | null> {
   const override = checkpoint.overrides[path];
-  return override == null ? readRevision(pi, repoRoot, checkpoint.headSha, path) : decodeStored(override);
+  return override == null
+    ? readRevision(pi, repoRoot, checkpoint.headSha, path)
+    : decodeStored(override);
 }
 
 export async function scanAgainstCheckpoint(
@@ -143,26 +219,36 @@ export async function scanAgainstCheckpoint(
     ...Object.keys(checkpoint.overrides),
   ]);
 
-  const pairs = await Promise.all([...candidates].map(async (path): Promise<FilePair | null> => {
-    const [originalContent, modifiedContent] = await Promise.all([
-      baselineContent(pi, repoRoot, checkpoint, path),
-      readCurrent(repoRoot, path),
-    ]);
-    if (originalContent === modifiedContent) return null;
-    return {
-      path,
-      status: statusFor(originalContent, modifiedContent),
-      fingerprint: fingerprint(modifiedContent),
-      originalContent: originalContent ?? "",
-      modifiedContent: modifiedContent ?? "",
-    };
-  }));
+  const pairs = await Promise.all(
+    [...candidates].map(async (path): Promise<FilePair | null> => {
+      const [originalContent, modifiedContent] = await Promise.all([
+        baselineContent(pi, repoRoot, checkpoint, path),
+        readCurrent(repoRoot, path),
+      ]);
+      if (originalContent === modifiedContent) return null;
+      return {
+        path,
+        status: statusFor(originalContent, modifiedContent),
+        fingerprint: fingerprint(modifiedContent),
+        originalContent: originalContent ?? "",
+        modifiedContent: modifiedContent ?? "",
+      };
+    }),
+  );
 
-  return pairs.filter((pair): pair is FilePair => pair != null).sort((a, b) => a.path.localeCompare(b.path));
+  return pairs
+    .filter((pair): pair is FilePair => pair != null)
+    .sort((a, b) => a.path.localeCompare(b.path));
 }
 
-export async function scanAgainstHead(pi: ExtensionAPI, repoRoot: string): Promise<FilePair[]> {
-  return scanAgainstCheckpoint(pi, repoRoot, { headSha: await getHeadSha(pi, repoRoot), overrides: {} });
+export async function scanAgainstHead(
+  pi: ExtensionAPI,
+  repoRoot: string,
+): Promise<FilePair[]> {
+  return scanAgainstCheckpoint(pi, repoRoot, {
+    headSha: await getHeadSha(pi, repoRoot),
+    overrides: {},
+  });
 }
 
 export async function createCheckpoint(
@@ -189,7 +275,10 @@ export async function createCheckpoint(
   };
 }
 
-export async function fileMtime(repoRoot: string, path: string): Promise<number> {
+export async function fileMtime(
+  repoRoot: string,
+  path: string,
+): Promise<number> {
   const absolute = join(repoRoot, path);
   try {
     return (await stat(absolute)).mtimeMs;

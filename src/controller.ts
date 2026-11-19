@@ -1,7 +1,10 @@
 import { relative, sep } from "node:path";
-import { watch, type FSWatcher } from "chokidar";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { open, type GlimpseWindow } from "glimpseui";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
+import { type FSWatcher, watch } from "chokidar";
+import { type GlimpseWindow, open } from "glimpseui";
 import { createCheckpoint, getRepoRoot } from "./git.js";
 import { composeFeedback } from "./prompt.js";
 import type { HostMessage, ReviewCheckpoint, WindowMessage } from "./types.js";
@@ -13,16 +16,26 @@ export const CHECKPOINT_ENTRY = "review-loop/checkpoint";
 function isCheckpoint(value: unknown): value is ReviewCheckpoint {
   if (value == null || typeof value !== "object") return false;
   const item = value as Partial<ReviewCheckpoint>;
-  return item.version === 1 && typeof item.repoRoot === "string" && typeof item.createdAt === "number"
-    && typeof item.overrides === "object" && Array.isArray(item.reviewedPaths);
+  return (
+    item.version === 1 &&
+    typeof item.repoRoot === "string" &&
+    typeof item.createdAt === "number" &&
+    typeof item.overrides === "object" &&
+    Array.isArray(item.reviewedPaths)
+  );
 }
 
-function latestCheckpoint(ctx: ExtensionCommandContext, repoRoot: string): ReviewCheckpoint | null {
+function latestCheckpoint(
+  ctx: ExtensionCommandContext,
+  repoRoot: string,
+): ReviewCheckpoint | null {
   const branch = ctx.sessionManager.getBranch();
   for (let index = branch.length - 1; index >= 0; index -= 1) {
     const entry = branch[index];
-    if (entry.type !== "custom" || entry.customType !== CHECKPOINT_ENTRY) continue;
-    if (isCheckpoint(entry.data) && entry.data.repoRoot === repoRoot) return entry.data;
+    if (entry.type !== "custom" || entry.customType !== CHECKPOINT_ENTRY)
+      continue;
+    if (isCheckpoint(entry.data) && entry.data.repoRoot === repoRoot)
+      return entry.data;
   }
   return null;
 }
@@ -31,11 +44,19 @@ function latestCheckpoint(ctx: ExtensionCommandContext, repoRoot: string): Revie
 // \u escapes: they can never terminate the string or form markup such as
 // </script>, regardless of file names or comment text.
 function escapeInline(value: string): string {
-  return value.replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
+  return value
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026");
 }
 
 function parseMessage(value: unknown): WindowMessage | null {
-  if (value == null || typeof value !== "object" || typeof (value as { type?: unknown }).type !== "string") return null;
+  if (
+    value == null ||
+    typeof value !== "object" ||
+    typeof (value as { type?: unknown }).type !== "string"
+  )
+    return null;
   return value as WindowMessage;
 }
 
@@ -65,7 +86,11 @@ export class ReviewController {
     }
 
     this.repoRoot = await getRepoRoot(this.pi, ctx.cwd);
-    this.model = await WorkspaceModel.create(this.pi, this.repoRoot, latestCheckpoint(ctx, this.repoRoot));
+    this.model = await WorkspaceModel.create(
+      this.pi,
+      this.repoRoot,
+      latestCheckpoint(ctx, this.repoRoot),
+    );
     await this.model.refresh();
     await this.startWatcher();
 
@@ -75,7 +100,11 @@ export class ReviewController {
     const fromDisk = process.platform === "linux";
     // Empty html keeps glimpseui's first "ready" event flowing to us, where
     // the content is loaded via loadFile (see below).
-    const window = open(fromDisk ? "" : loadReviewHtml(), { width: 1480, height: 920, title: "Review Loop" });
+    const window = open(fromDisk ? "" : loadReviewHtml(), {
+      width: 1480,
+      height: 920,
+      title: "Review Loop",
+    });
     this.window = window;
     if (fromDisk) {
       let htmlLoaded = false;
@@ -107,7 +136,9 @@ export class ReviewController {
     this.watcher = null;
     const window = this.window;
     this.window = null;
-    try { window?.close(); } catch {}
+    try {
+      window?.close();
+    } catch {}
   }
 
   private async startWatcher(): Promise<void> {
@@ -115,7 +146,12 @@ export class ReviewController {
       ignoreInitial: true,
       ignored: (path) => {
         const rel = relative(this.repoRoot, path);
-        return rel === ".git" || rel.startsWith(`.git${sep}`) || rel === "node_modules" || rel.startsWith(`node_modules${sep}`);
+        return (
+          rel === ".git" ||
+          rel.startsWith(`.git${sep}`) ||
+          rel === "node_modules" ||
+          rel.startsWith(`node_modules${sep}`)
+        );
       },
     });
     // chokidar only reports paths under the watch root, so any event means
@@ -139,7 +175,10 @@ export class ReviewController {
     this.operation = this.operation.then(task, task).catch(() => {});
   }
 
-  private async handleMessage(message: WindowMessage, ctx: ExtensionCommandContext): Promise<void> {
+  private async handleMessage(
+    message: WindowMessage,
+    ctx: ExtensionCommandContext,
+  ): Promise<void> {
     if (this.model == null) return;
     if (message.type === "ready") {
       this.send({ type: "workspace", state: this.model.state() });
@@ -154,9 +193,17 @@ export class ReviewController {
 
     if (message.type === "request-file") {
       try {
-        this.send({ type: "file", requestId: message.requestId, file: this.model.getFile(message.path, message.mode) });
+        this.send({
+          type: "file",
+          requestId: message.requestId,
+          file: this.model.getFile(message.path, message.mode),
+        });
       } catch (error) {
-        this.send({ type: "file-error", requestId: message.requestId, message: error instanceof Error ? error.message : String(error) });
+        this.send({
+          type: "file-error",
+          requestId: message.requestId,
+          message: error instanceof Error ? error.message : String(error),
+        });
       }
       return;
     }
@@ -166,7 +213,12 @@ export class ReviewController {
       try {
         const feedback = composeFeedback(message.comments);
         const reviewedPaths = this.model.checkpointChangedPaths();
-        const checkpoint = await createCheckpoint(this.pi, this.repoRoot, reviewedPaths, feedback);
+        const checkpoint = await createCheckpoint(
+          this.pi,
+          this.repoRoot,
+          reviewedPaths,
+          feedback,
+        );
         this.pi.appendEntry<ReviewCheckpoint>(CHECKPOINT_ENTRY, checkpoint);
         this.model.setCheckpoint(checkpoint);
         const state = await this.model.refresh();
@@ -176,16 +228,30 @@ export class ReviewController {
           // instead so feedback always lands next to whatever is already there.
           try {
             const existing = ctx.ui.getEditorText?.() ?? "";
-            ctx.ui.setEditorText(existing ? `${existing}\n\n${feedback}` : feedback);
+            ctx.ui.setEditorText(
+              existing ? `${existing}\n\n${feedback}` : feedback,
+            );
           } catch {
             ctx.ui.pasteToEditor(feedback);
           }
         }
         this.send({ type: "workspace", state });
-        this.send({ type: "review-submitted", checkpointAt: checkpoint.createdAt, insertedFeedback: feedback.length > 0 });
-        ctx.ui.notify(feedback ? "Review checkpoint saved; feedback inserted into the editor." : "Review checkpoint saved.", "info");
+        this.send({
+          type: "review-submitted",
+          checkpointAt: checkpoint.createdAt,
+          insertedFeedback: feedback.length > 0,
+        });
+        ctx.ui.notify(
+          feedback
+            ? "Review checkpoint saved; feedback inserted into the editor."
+            : "Review checkpoint saved.",
+          "info",
+        );
       } catch (error) {
-        ctx.ui.notify(`Could not save review checkpoint: ${error instanceof Error ? error.message : String(error)}`, "error");
+        ctx.ui.notify(
+          `Could not save review checkpoint: ${error instanceof Error ? error.message : String(error)}`,
+          "error",
+        );
       } finally {
         this.submitting = false;
       }
@@ -195,7 +261,9 @@ export class ReviewController {
   private send(message: HostMessage): void {
     if (this.window == null) return;
     const payload = escapeInline(JSON.stringify(message));
-    try { this.window.send(`window.__reviewReceive(${payload})`); } catch {}
+    try {
+      this.window.send(`window.__reviewReceive(${payload})`);
+    } catch {}
   }
 
   private disposeWindow(window: GlimpseWindow): void {
