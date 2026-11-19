@@ -1,4 +1,4 @@
-// Pure helpers for stateful per-line colorization of unified diff rows.
+// Pure helpers for unified diff row colorization and word-diff box placement.
 // No DOM and no monaco imports so this stays unit-testable under node:test.
 
 export type DiffSide = "original" | "modified";
@@ -71,6 +71,22 @@ export function splitAtWordBounds(value: string, offset: number, bounds: readonl
     if (offset + local >= bound.end) index += 1;
   }
   return { pieces, nextIndex: index };
+}
+
+// Whether a colorized line's decoded text matches the expected source text.
+// Monaco renders plain spaces as no-break spaces, one for one, so those two
+// count as equal; anything else — tabs (which it expands to runs of no-break
+// spaces, shifting offsets) or stale side content — fails the match.
+export function matchesColorizedText(actual: string, expected: string): boolean {
+  if (actual.length !== expected.length) return false;
+  for (let i = 0; i < actual.length; i += 1) {
+    const a = actual.charCodeAt(i);
+    const b = expected.charCodeAt(i);
+    if (a === b) continue;
+    if ((a === 32 || a === 160) && (b === 32 || b === 160)) continue;
+    return false;
+  }
+  return true;
 }
 
 // Which file side supplies a row's stateful colorization. Additions exist only

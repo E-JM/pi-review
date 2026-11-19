@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { colorizeSourceFor, splitAtWordBounds, splitColorizedLines, wordBounds } from "../web/src/colorize.js";
+import { colorizeSourceFor, matchesColorizedText, splitAtWordBounds, splitColorizedLines, wordBounds } from "../web/src/colorize.js";
 
 test("splitColorizedLines splits monaco colorize output into per-line chunks", () => {
   const html = "<span>a</span><br/><span>b</span><br/>";
@@ -105,6 +105,18 @@ test("splitAtWordBounds leaves a bound open until a run passes its end", () => {
     { text: "d", className: null },
   ]);
   assert.equal(second.nextIndex, 1);
+});
+
+test("matchesColorizedText treats plain and no-break spaces as equal", () => {
+  assert.equal(matchesColorizedText("a\u00a0b c", "a b c"), true);
+  assert.equal(matchesColorizedText("a b c", "a\u00a0b\u00a0c"), true);
+  assert.equal(matchesColorizedText("abc", "abc"), true);
+});
+
+test("matchesColorizedText rejects tabs, wrong characters, and length drift", () => {
+  assert.equal(matchesColorizedText("\tabc", " abc"), false);
+  assert.equal(matchesColorizedText("axc", "abc"), false);
+  assert.equal(matchesColorizedText("short", "longer"), false);
 });
 
 test("splitAtWordBounds resumes mid-bound in a later run", () => {
