@@ -65,6 +65,23 @@ test("splitAtWordBounds keeps a run outside all bounds intact", () => {
   assert.deepEqual(result, { pieces: [{ text: "plain text", className: null }], nextIndex: 0 });
 });
 
+test("splitAtWordBounds handles empty bounds and empty runs", () => {
+  assert.deepEqual(splitAtWordBounds("abc", 0, [], 0), { pieces: [{ text: "abc", className: null }], nextIndex: 0 });
+  assert.deepEqual(splitAtWordBounds("", 0, [{ start: 1, end: 3, className: "u-w-del" }], 1), { pieces: [], nextIndex: 1 });
+});
+
+test("splitAtWordBounds handles touching del/add bounds", () => {
+  const result = splitAtWordBounds("abcd", 0, [
+    { start: 0, end: 2, className: "u-w-del" },
+    { start: 2, end: 4, className: "u-w-add" },
+  ], 0);
+  assert.deepEqual(result.pieces, [
+    { text: "ab", className: "u-w-del" },
+    { text: "cd", className: "u-w-add" },
+  ]);
+  assert.equal(result.nextIndex, 2);
+});
+
 test("splitAtWordBounds boxes the changed middle of a run", () => {
   const result = splitAtWordBounds("old new tail", 0, [{ start: 4, end: 7, className: "u-w-add" }], 0);
   assert.deepEqual(result.pieces, [

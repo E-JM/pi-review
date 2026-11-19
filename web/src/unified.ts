@@ -532,6 +532,12 @@ export class UnifiedDiffView {
       const merged = decorate(html);
       if (merged != null) code.replaceChildren(merged);
     };
+    // Checked at dispatch and again when the colorize promise resolves: the
+    // row can be re-rendered in place between the two (same element, same
+    // generation), and a then-fresh search highlight must not be overwritten.
+    const stale = () =>
+      generation !== this.generation || !code.isConnected
+      || (this.searchQuery !== "" && row.text.toLowerCase().includes(this.searchQuery));
     const source = row.fullLength == null
       ? colorizeSourceFor(row, {
         original: this.originalContent.length <= COLORIZE_SIDE_MAX_CHARS,
@@ -541,10 +547,9 @@ export class UnifiedDiffView {
     if (source != null) {
       const content = source.side === "original" ? this.originalContent : this.modifiedContent;
       this.idle(() => {
-        if (generation !== this.generation || !code.isConnected) return;
-        if (this.searchQuery && row.text.toLowerCase().includes(this.searchQuery)) return;
+        if (stale()) return;
         void this.sideLinesFor(source.side, content).then((lines) => {
-          if (generation !== this.generation || !code.isConnected) return;
+          if (stale()) return;
           const html = lines[source.line - 1];
           if (html) apply(html);
         }, () => {});
@@ -554,10 +559,9 @@ export class UnifiedDiffView {
     if (row.text.length > COLORIZE_MAX_CHARS) return;
     const promise = this.colorizePromise(row.text);
     this.idle(() => {
-      if (generation !== this.generation || !code.isConnected) return;
-      if (this.searchQuery && row.text.toLowerCase().includes(this.searchQuery)) return;
+      if (stale()) return;
       void promise.then((html) => {
-        if (generation !== this.generation || !code.isConnected) return;
+        if (stale()) return;
         if (!html) return;
         apply(stripTrailingBr(html));
       }, () => {});
