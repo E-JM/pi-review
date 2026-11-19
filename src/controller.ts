@@ -13,7 +13,8 @@ export const CHECKPOINT_ENTRY = "review-loop/checkpoint";
 function isCheckpoint(value: unknown): value is ReviewCheckpoint {
   if (value == null || typeof value !== "object") return false;
   const item = value as Partial<ReviewCheckpoint>;
-  return item.version === 1 && typeof item.repoRoot === "string" && typeof item.createdAt === "number" && typeof item.overrides === "object";
+  return item.version === 1 && typeof item.repoRoot === "string" && typeof item.createdAt === "number"
+    && typeof item.overrides === "object" && Array.isArray(item.reviewedPaths);
 }
 
 function latestCheckpoint(ctx: ExtensionCommandContext, repoRoot: string): ReviewCheckpoint | null {
@@ -26,6 +27,9 @@ function latestCheckpoint(ctx: ExtensionCommandContext, repoRoot: string): Revie
   return null;
 }
 
+// The payload is evaluated as script inside the window, so <, >, and & become
+// \u escapes: they can never terminate the string or form markup such as
+// </script>, regardless of file names or comment text.
 function escapeInline(value: string): string {
   return value.replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
 }
@@ -114,17 +118,9 @@ export class ReviewController {
         return rel === ".git" || rel.startsWith(`.git${sep}`) || rel === "node_modules" || rel.startsWith(`node_modules${sep}`);
       },
     });
-    this.watcher.on("all", (_event, path) => {
-      const repoPath = this.toRepoPath(path);
-      if (repoPath == null) return;
-      this.scheduleRefresh();
-    });
-  }
-
-  private toRepoPath(absolutePath: string): string | null {
-    const path = relative(this.repoRoot, absolutePath);
-    if (!path || path === ".." || path.startsWith(`..${sep}`)) return null;
-    return path.split(sep).join("/");
+    // chokidar only reports paths under the watch root, so any event means
+    // the workspace may have changed.
+    this.watcher.on("all", () => this.scheduleRefresh());
   }
 
   private scheduleRefresh(): void {

@@ -41,6 +41,9 @@ export async function getBranchName(pi: ExtensionAPI, repoRoot: string): Promise
   return branch || null;
 }
 
+// Parses `git status --porcelain=v1 -z` output: each entry is "XY <path>\0",
+// and rename/copy entries (R or C in XY) carry the original path as one extra
+// NUL-terminated field after the new path. Returns both paths for renames.
 export function parsePorcelainPaths(output: string): string[] {
   const fields = output.split("\0");
   const paths: string[] = [];

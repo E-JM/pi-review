@@ -85,9 +85,13 @@ export default function reviewLoop(pi: ExtensionAPI) {
       ctx.ui.notify("Review Loop requires interactive TUI mode.", "warning");
       return;
     }
+    const active = getController();
     try {
-      await getController().openOrShow(ctx);
+      await active.openOrShow(ctx);
     } catch (error) {
+      // openOrShow may fail after the watcher/window were created; release
+      // them instead of leaking a half-initialized controller.
+      await active.close();
       controller = null;
       ctx.ui.notify(`Could not open Review Loop: ${error instanceof Error ? error.message : String(error)}`, "error");
     }
