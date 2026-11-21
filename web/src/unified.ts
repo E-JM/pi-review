@@ -918,8 +918,14 @@ export class UnifiedDiffView {
     count: number,
   ): Map<number, BracketMark[]> {
     const marks = new Map<number, BracketMark[]>();
+    // End the range at the last line's final column: a range ending at
+    // column 1 drops every bracket after it (monaco only collects brackets
+    // starting within the range), so a trailing `}` would stay uncolored.
     const brackets = (model as unknown as BracketModelLike).bracketPairs
-      ?.getBracketsInRange(new monaco.Range(1, 1, count, 1), true)
+      ?.getBracketsInRange(
+        new monaco.Range(1, 1, count, model.getLineMaxColumn(count)),
+        true,
+      )
       .toArray();
     if (brackets == null) return marks;
     for (const bracket of brackets) {
