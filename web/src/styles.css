@@ -323,6 +323,14 @@ button { color: inherit; }
 .u-row:hover .u-row-main { filter: brightness(1.25); }
 .u-row .u-w-del { background: #8f3a4b66; border-radius: 2px; }
 .u-row .u-w-add { background: #2d6a4f66; border-radius: 2px; }
+/* Bracket pair colors, mirroring the editor's bracket colorization palette
+   (editorBracketHighlight.foreground1-3 dark defaults, and the unexpected
+   bracket color). The editor's own rules are .monaco-editor-scoped and do
+   not reach the unified view's DOM. */
+.u-bracket-0 { color: #ffd700; }
+.u-bracket-1 { color: #da70d6; }
+.u-bracket-2 { color: #179fff; }
+.u-bracket-bad { color: rgba(255, 18, 18, 0.8); }
 .u-row.commented .u-row-main { background: rgba(122, 162, 247, .1); box-shadow: inset 2px 0 0 var(--accent); }
 .u-noeol { padding: 0 12px 0 calc(44px + 1ch + 12px); color: var(--faint); font-size: 10px; font-style: italic; line-height: 16px; }
 .u-more { color: var(--faint); font-style: italic; }

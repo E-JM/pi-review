@@ -1,6 +1,20 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { fileMtime, getBranchName, getHeadSha, repoName, scanAgainstCheckpoint, scanAgainstHead, type FilePair } from "./git.js";
-import type { ChangedFile, FileContents, ReviewCheckpoint, ReviewMode, WorkspaceState } from "./types.js";
+import {
+  type FilePair,
+  fileMtime,
+  getBranchName,
+  getHeadSha,
+  repoName,
+  scanAgainstCheckpoint,
+  scanAgainstHead,
+} from "./git.js";
+import type {
+  ChangedFile,
+  FileContents,
+  ReviewCheckpoint,
+  ReviewMode,
+  WorkspaceState,
+} from "./types.js";
 
 export class WorkspaceModel {
   private mode: ReviewMode = "checkpoint";
@@ -20,8 +34,17 @@ export class WorkspaceModel {
     this.initialHead = initialHead;
   }
 
-  static async create(pi: ExtensionAPI, repoRoot: string, checkpoint: ReviewCheckpoint | null): Promise<WorkspaceModel> {
-    return new WorkspaceModel(pi, repoRoot, checkpoint, await getHeadSha(pi, repoRoot));
+  static async create(
+    pi: ExtensionAPI,
+    repoRoot: string,
+    checkpoint: ReviewCheckpoint | null,
+  ): Promise<WorkspaceModel> {
+    return new WorkspaceModel(
+      pi,
+      repoRoot,
+      checkpoint,
+      await getHeadSha(pi, repoRoot),
+    );
   }
 
   get currentMode(): ReviewMode {
@@ -42,7 +65,10 @@ export class WorkspaceModel {
     this.mtimes.clear();
   }
 
-  private checkpointBaseline(): Pick<ReviewCheckpoint, "headSha" | "overrides"> {
+  private checkpointBaseline(): Pick<
+    ReviewCheckpoint,
+    "headSha" | "overrides"
+  > {
     return this.checkpoint ?? { headSha: this.initialHead, overrides: {} };
   }
 
@@ -53,11 +79,25 @@ export class WorkspaceModel {
       getBranchName(this.pi, this.repoRoot),
     ]);
     this.branch = branch;
-    this.pairsByMode.set("checkpoint", new Map(checkpointPairs.map((pair) => [pair.path, pair])));
-    this.pairsByMode.set("head", new Map(headPairs.map((pair) => [pair.path, pair])));
+    this.pairsByMode.set(
+      "checkpoint",
+      new Map(checkpointPairs.map((pair) => [pair.path, pair])),
+    );
+    this.pairsByMode.set(
+      "head",
+      new Map(headPairs.map((pair) => [pair.path, pair])),
+    );
 
-    const paths = new Set([...checkpointPairs, ...headPairs].map((pair) => pair.path));
-    this.mtimes = new Map(await Promise.all([...paths].map(async (path) => [path, await fileMtime(this.repoRoot, path)] as const)));
+    const paths = new Set(
+      [...checkpointPairs, ...headPairs].map((pair) => pair.path),
+    );
+    this.mtimes = new Map(
+      await Promise.all(
+        [...paths].map(
+          async (path) => [path, await fileMtime(this.repoRoot, path)] as const,
+        ),
+      ),
+    );
     return this.state();
   }
 
@@ -68,10 +108,17 @@ export class WorkspaceModel {
       fingerprint: pair.fingerprint,
       recentAt: this.mtimes.get(pair.path),
     });
-    const files = [...(this.pairsByMode.get(this.mode)?.values() ?? [])].map(toChangedFile);
-    const pendingFiles = [...(this.pairsByMode.get("checkpoint")?.values() ?? [])].map(toChangedFile);
+    const files = [...(this.pairsByMode.get(this.mode)?.values() ?? [])].map(
+      toChangedFile,
+    );
+    const pendingFiles = [
+      ...(this.pairsByMode.get("checkpoint")?.values() ?? []),
+    ].map(toChangedFile);
     const recentPaths = [...files]
-      .sort((a, b) => (b.recentAt ?? 0) - (a.recentAt ?? 0) || a.path.localeCompare(b.path))
+      .sort(
+        (a, b) =>
+          (b.recentAt ?? 0) - (a.recentAt ?? 0) || a.path.localeCompare(b.path),
+      )
       .map((file) => file.path);
 
     return {
@@ -89,7 +136,8 @@ export class WorkspaceModel {
 
   getFile(path: string, mode: ReviewMode): FileContents {
     const pair = this.pairsByMode.get(mode)?.get(path);
-    if (pair == null) throw new Error(`${path} is no longer changed in this mode.`);
+    if (pair == null)
+      throw new Error(`${path} is no longer changed in this mode.`);
     return {
       path,
       mode,
