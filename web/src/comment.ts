@@ -61,6 +61,12 @@ export interface FocusedComment {
   end: number;
 }
 
+export function findCommentTextarea(id: string): HTMLTextAreaElement | null {
+  return document.querySelector(
+    `textarea[data-comment-id="${CSS.escape(id)}"]`,
+  );
+}
+
 export function captureFocusedComment(): FocusedComment | null {
   const active = document.activeElement;
   if (
@@ -77,9 +83,7 @@ export function captureFocusedComment(): FocusedComment | null {
 
 export function restoreFocusedComment(capture: FocusedComment | null): void {
   if (capture == null) return;
-  const textarea = document.querySelector<HTMLTextAreaElement>(
-    `textarea[data-comment-id="${CSS.escape(capture.id)}"]`,
-  );
+  const textarea = findCommentTextarea(capture.id);
   if (textarea != null) {
     textarea.focus();
     textarea.setSelectionRange(capture.start, capture.end);

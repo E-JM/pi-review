@@ -25,6 +25,7 @@ import {
   captureFocusedComment,
   commentSideLabel,
   createInlineCommentElement,
+  findCommentTextarea,
   restoreFocusedComment,
   type UiComment,
 } from "./comment.js";
@@ -206,7 +207,7 @@ const unifiedView = new UnifiedDiffView(unifiedEl, {
   addComment: (side, line) => addInlineComment(side, line),
   deleteComment: (id) => removeComment(id),
   onCommentInput: () => updateSubmitButton(),
-  showToast: showToast,
+  showToast,
 });
 
 function send(message: unknown): void {
@@ -896,11 +897,7 @@ function addInlineComment(side: "original" | "modified", line: number): void {
       comment.line === line,
   );
   if (existing) {
-    document
-      .querySelector<HTMLTextAreaElement>(
-        `textarea[data-comment-id="${existing.id}"]`,
-      )
-      ?.focus();
+    findCommentTextarea(existing.id)?.focus();
     return;
   }
   const created: UiComment = {
@@ -926,11 +923,7 @@ function addInlineComment(side: "original" | "modified", line: number): void {
     editor.revealLineInCenter(line);
   }
   // Only a brand-new draft takes focus; zone/row rebuilds never do.
-  document
-    .querySelector<HTMLTextAreaElement>(
-      `textarea[data-comment-id="${created.id}"]`,
-    )
-    ?.focus();
+  findCommentTextarea(created.id)?.focus();
 }
 
 function installGutterComments(
