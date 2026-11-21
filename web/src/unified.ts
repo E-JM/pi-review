@@ -5,6 +5,7 @@ import {
   type DiffSide,
   matchesColorizedText,
   splitAtWordBounds,
+  type WordPiece,
   wordBounds,
 } from "./colorize.js";
 import {
@@ -78,6 +79,33 @@ function el<K extends keyof HTMLElementTagNameMap>(
 
 function stripTrailingBr(html: string): string {
   return html.replace(/<br\/>$/, "");
+}
+
+// Parses colorized line HTML into detached nodes. `innerHTML` on a template
+// never executes scripts and matches how the fragments land in the DOM.
+function parseFragment(html: string): DocumentFragment {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  return template.content;
+}
+
+function textNodes(root: Node): Text[] {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  for (let node = walker.nextNode(); node != null; node = walker.nextNode())
+    nodes.push(node as Text);
+  return nodes;
+}
+
+function piecesFragment(pieces: readonly WordPiece[]): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  for (const piece of pieces)
+    fragment.append(
+      piece.className == null
+        ? document.createTextNode(piece.text)
+        : el("span", piece.className, piece.text),
+    );
+  return fragment;
 }
 
 // Bracket scanner output for one colorized line, as 0-based source-text
@@ -708,17 +736,16 @@ export class UnifiedDiffView {
         code.innerHTML = html;
         return;
       }
-      let fragment: DocumentFragment | null;
       if (decorate == null) {
-        const template = document.createElement("template");
-        template.innerHTML = html;
-        fragment = template.content;
-      } else {
-        fragment = decorate(html);
-        if (fragment == null) return;
+        const fragment = parseFragment(html);
+        if (marks != null) this.wrapBracketMarks(fragment, marks, row.text);
+        code.replaceChildren(fragment);
+        return;
       }
-      if (marks != null) this.wrapBracketMarks(fragment, marks, row.text);
-      code.replaceChildren(fragment);
+      const merged = decorate(html);
+      if (merged == null) return;
+      if (marks != null) this.wrapBracketMarks(merged, marks, row.text);
+      code.replaceChildren(merged);
     };
     // Checked at dispatch and again when the colorize promise resolves: the
     // row can be re-rendered in place between the two (same element, same
@@ -772,27 +799,26 @@ export class UnifiedDiffView {
   // Re-applies bracket pair colors on top of colorized line HTML: walks text
   // nodes with a source-text cursor (spaces render as no-break spaces 1:1, so
   // slices must re-verify per node) and wraps each mark's slice in its color
-  // class. Lines whose rendered text no longer aligns with the source (tab
-  // expansion shifts offsets) keep their plain token colors instead. Runs
-  // after the word-diff merge, so fragments split for box painting still get
-  // their brackets colored.
+  // class. Runs after the word-diff merge, so fragments split for box
+  // painting still get their brackets colored.
+  // All-or-nothing: replacements are planned against the source text before
+  // any node is touched, and a line whose rendered text no longer aligns with
+  // the source (tab expansion shifts offsets) or whose marks do not fit its
+  // nodes keeps its plain token colors instead.
   private wrapBracketMarks(
     fragment: DocumentFragment,
     marks: readonly BracketMark[],
     source: string,
   ): void {
-    const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT);
-    const nodes: Text[] = [];
-    for (let node = walker.nextNode(); node != null; node = walker.nextNode())
-      nodes.push(node as Text);
+    const replacements: Array<{ node: Text; pieces: WordPiece[] }> = [];
     let offset = 0;
     let index = 0;
-    for (const node of nodes) {
+    for (const node of textNodes(fragment)) {
       if (index >= marks.length) break;
       const length = node.data.length;
       const slice = source.slice(offset, offset + length);
       if (!matchesColorizedText(node.data, slice)) return;
-      const pieces: Array<{ text: string; className: string | null }> = [];
+      const pieces: WordPiece[] = [];
       let cursor = 0;
       while (
         index < marks.length &&
@@ -814,17 +840,15 @@ export class UnifiedDiffView {
       if (pieces.length > 0) {
         if (cursor < length)
           pieces.push({ text: slice.slice(cursor), className: null });
-        const replace = document.createDocumentFragment();
-        for (const piece of pieces)
-          replace.append(
-            piece.className == null
-              ? document.createTextNode(piece.text)
-              : el("span", piece.className, piece.text),
-          );
-        node.parentNode?.replaceChild(replace, node);
+        replacements.push({ node, pieces });
       }
       offset += length;
     }
+    // Marks left over after the last text node straddle two nodes; they
+    // cannot be wrapped, so the whole line stays plain.
+    if (index < marks.length) return;
+    for (const { node, pieces } of replacements)
+      node.parentNode?.replaceChild(piecesFragment(pieces), node);
   }
 
   // Re-applies word-diff boxes on top of colorized line HTML: token spans are
@@ -840,18 +864,10 @@ export class UnifiedDiffView {
     const text = spans.map((span) => span.text).join("");
     const bounds = wordBounds(spans);
     if (bounds.length === 0) return null;
-    const template = document.createElement("template");
-    template.innerHTML = html;
-    const walker = document.createTreeWalker(
-      template.content,
-      NodeFilter.SHOW_TEXT,
-    );
-    const nodes: Text[] = [];
-    for (let node = walker.nextNode(); node != null; node = walker.nextNode())
-      nodes.push(node as Text);
+    const fragment = parseFragment(html);
     let offset = 0;
     let boundIndex = 0;
-    for (const textNode of nodes) {
+    for (const textNode of textNodes(fragment)) {
       if (
         !matchesColorizedText(
           textNode.data,
@@ -868,18 +884,10 @@ export class UnifiedDiffView {
       boundIndex = nextIndex;
       offset += textNode.data.length;
       if (pieces.length === 1 && pieces[0].className == null) continue;
-      const fragment = document.createDocumentFragment();
-      for (const piece of pieces) {
-        fragment.append(
-          piece.className == null
-            ? document.createTextNode(piece.text)
-            : el("span", piece.className, piece.text),
-        );
-      }
-      textNode.parentNode?.replaceChild(fragment, textNode);
+      textNode.parentNode?.replaceChild(piecesFragment(pieces), textNode);
     }
     if (boundIndex < bounds.length || offset !== text.length) return null;
-    return template.content;
+    return fragment;
   }
 
   // One colorize call per file side, memoized for the mounted content: the
