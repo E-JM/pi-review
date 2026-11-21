@@ -250,8 +250,10 @@ test("word pairing: similar lines get intra-line spans, dissimilar stay whole-li
   const far = buildDiffModel("alpha beta gamma\nc\n", "one two three\nc\n");
   const farDel = far.rows.find((row) => row.type === "del");
   const farAdd = far.rows.find((row) => row.type === "add");
-  assert.equal(farDel?.spans, undefined);
-  assert.equal(farAdd?.spans, undefined);
+  // Too dissimilar for fragment diffing: whole-line spans keep the word
+  // color painting across the rows, same as the split view renders them.
+  assert.deepEqual(farDel?.spans, [{ text: "alpha beta gamma", kind: "del" }]);
+  assert.deepEqual(farAdd?.spans, [{ text: "one two three", kind: "add" }]);
 });
 
 test("oversized lines are truncated for display and keep their line numbers", () => {
@@ -269,6 +271,25 @@ test("oversized lines are truncated for display and keep their line numbers", ()
   assert.equal(del.spans, undefined, "over-length pairs skip word diff");
   assert.equal(model.rows[0].fullLength, undefined, "short rows are untouched");
   assert.deepEqual(model.stats, { additions: 1, deletions: 1 });
+});
+
+test("unmatched rows paint whole-line spans like the split view", () => {
+  // Brand-new file: every add row pairs with nothing, so each non-empty one
+  // carries a single whole-line span; an empty add row boxes nothing.
+  const model = buildDiffModel("", "first\n\nthird\n");
+  const adds = model.rows.filter((row) => row.type === "add");
+  assert.equal(adds.length, 3);
+  assert.deepEqual(adds[0].spans, [{ text: "first", kind: "add" }]);
+  assert.equal(adds[1].spans, undefined, "empty add row stays plain");
+  assert.deepEqual(adds[2].spans, [{ text: "third", kind: "add" }]);
+
+  // Block-size mismatch: the surplus add rows still get whole-line spans.
+  const mismatch = buildDiffModel("gone\n", "a\nb\nc\n");
+  const surplus = mismatch.rows.filter((row) => row.type === "add");
+  assert.equal(surplus.length, 3);
+  assert.ok(surplus.every((row) => row.spans?.length === 1));
+  const del = mismatch.rows.find((row) => row.type === "del");
+  assert.deepEqual(del?.spans, [{ text: "gone", kind: "del" }]);
 });
 
 test("binary content is detected and produces an empty model", () => {

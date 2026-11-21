@@ -5,7 +5,6 @@ import {
   type DiffSide,
   matchesColorizedText,
   splitAtWordBounds,
-  splitColorizedLines,
   wordBounds,
 } from "./colorize.js";
 import {
@@ -40,6 +39,9 @@ const LINE_HEIGHT = 19;
 const SEARCH_REVEAL_CAP = 50;
 const COLORIZE_BATCH = 8;
 const COLORIZE_CACHE_MAX = 5000;
+// The editor cycles bracket colors through editorBracketHighlight.foreground
+// 1-3 (its registered dark palette); class names here follow the same cycle.
+const BRACKET_COLORS = 3;
 // Tokenizing a very long line can block for seconds; long rows stay plain.
 const COLORIZE_MAX_CHARS = 1000;
 // Whole-side colorize (one call for a file's full content) is what keeps
@@ -78,6 +80,30 @@ function stripTrailingBr(html: string): string {
   return html.replace(/<br\/>$/, "");
 }
 
+// Bracket scanner output for one colorized line, as 0-based source-text
+// offsets. `model.bracketPairs` is not in Monaco's public typings, but it is
+// the same scanner the editor's bracket colorization decorations consume.
+interface BracketRangeLike {
+  range: monaco.IRange;
+  nestingLevel: number;
+  isInvalid: boolean;
+}
+
+interface BracketModelLike {
+  bracketPairs?: {
+    getBracketsInRange(
+      range: monaco.IRange,
+      onlyColorizedBrackets?: boolean,
+    ): { toArray(): BracketRangeLike[] };
+  };
+}
+
+interface BracketMark {
+  start: number;
+  end: number;
+  className: string;
+}
+
 interface PerFileState {
   fingerprint: string;
   visible: Interval[];
@@ -108,6 +134,8 @@ export class UnifiedDiffView {
   private colorizeQueue: Array<() => void> = [];
   private colorizeDraining = false;
   private sideLineHtml = new Map<DiffSide, Promise<string[]>>();
+  private sideModels = new Map<DiffSide, monaco.editor.ITextModel>();
+  private sideBrackets = new Map<DiffSide, Map<number, BracketMark[]>>();
   private searchOpen = false;
   private searchQuery = "";
   private searchMatches: number[] = [];
@@ -194,6 +222,7 @@ export class UnifiedDiffView {
     this.generation += 1;
     this.colorizeQueue.length = 0;
     this.sideLineHtml.clear();
+    this.disposeSideModels();
     this.currentKey = key;
     this.currentFingerprint = file.fingerprint;
     this.closeSearch();
@@ -222,6 +251,7 @@ export class UnifiedDiffView {
     this.generation += 1;
     this.colorizeQueue.length = 0;
     this.sideLineHtml.clear();
+    this.disposeSideModels();
     this.originalContent = "";
     this.modifiedContent = "";
     this.currentKey = null;
@@ -673,13 +703,22 @@ export class UnifiedDiffView {
     decorate?: (html: string) => DocumentFragment | null,
   ): void {
     if (this.language === "plaintext" || !row.text.trim()) return;
-    const apply = (html: string) => {
-      if (decorate == null) {
+    const apply = (html: string, marks?: readonly BracketMark[]) => {
+      if (decorate == null && marks == null) {
         code.innerHTML = html;
         return;
       }
-      const merged = decorate(html);
-      if (merged != null) code.replaceChildren(merged);
+      let fragment: DocumentFragment | null;
+      if (decorate == null) {
+        const template = document.createElement("template");
+        template.innerHTML = html;
+        fragment = template.content;
+      } else {
+        fragment = decorate(html);
+        if (fragment == null) return;
+      }
+      if (marks != null) this.wrapBracketMarks(fragment, marks, row.text);
+      code.replaceChildren(fragment);
     };
     // Checked at dispatch and again when the colorize promise resolves: the
     // row can be re-rendered in place between the two (same element, same
@@ -707,7 +746,8 @@ export class UnifiedDiffView {
           (lines) => {
             if (stale()) return;
             const html = lines[source.line - 1];
-            if (html) apply(html);
+            if (html)
+              apply(html, this.sideBrackets.get(source.side)?.get(source.line));
           },
           () => {},
         );
@@ -727,6 +767,64 @@ export class UnifiedDiffView {
         () => {},
       );
     });
+  }
+
+  // Re-applies bracket pair colors on top of colorized line HTML: walks text
+  // nodes with a source-text cursor (spaces render as no-break spaces 1:1, so
+  // slices must re-verify per node) and wraps each mark's slice in its color
+  // class. Lines whose rendered text no longer aligns with the source (tab
+  // expansion shifts offsets) keep their plain token colors instead. Runs
+  // after the word-diff merge, so fragments split for box painting still get
+  // their brackets colored.
+  private wrapBracketMarks(
+    fragment: DocumentFragment,
+    marks: readonly BracketMark[],
+    source: string,
+  ): void {
+    const walker = document.createTreeWalker(fragment, NodeFilter.SHOW_TEXT);
+    const nodes: Text[] = [];
+    for (let node = walker.nextNode(); node != null; node = walker.nextNode())
+      nodes.push(node as Text);
+    let offset = 0;
+    let index = 0;
+    for (const node of nodes) {
+      if (index >= marks.length) break;
+      const length = node.data.length;
+      const slice = source.slice(offset, offset + length);
+      if (!matchesColorizedText(node.data, slice)) return;
+      const pieces: Array<{ text: string; className: string | null }> = [];
+      let cursor = 0;
+      while (
+        index < marks.length &&
+        marks[index].start >= offset &&
+        marks[index].end <= offset + length
+      ) {
+        const mark = marks[index];
+        const start = mark.start - offset;
+        const end = mark.end - offset;
+        if (start > cursor)
+          pieces.push({ text: slice.slice(cursor, start), className: null });
+        pieces.push({
+          text: slice.slice(start, end),
+          className: mark.className,
+        });
+        cursor = end;
+        index += 1;
+      }
+      if (pieces.length > 0) {
+        if (cursor < length)
+          pieces.push({ text: slice.slice(cursor), className: null });
+        const replace = document.createDocumentFragment();
+        for (const piece of pieces)
+          replace.append(
+            piece.className == null
+              ? document.createTextNode(piece.text)
+              : el("span", piece.className, piece.text),
+          );
+        node.parentNode?.replaceChild(replace, node);
+      }
+      offset += length;
+    }
   }
 
   // Re-applies word-diff boxes on top of colorized line HTML: token spans are
@@ -788,16 +886,60 @@ export class UnifiedDiffView {
   // whole side is tokenized with carried state, then split into per-line HTML.
   // Created lazily inside the idle queue so the synchronous tokenize pass
   // never delays the initial paint.
+  // Colorizing runs against a live model so Monarch state carries across
+  // lines (multi-line block comments tokenize as comments, not code). Bracket
+  // pair colors are NOT part of that token stream — the editor paints them as
+  // decorations from the model's bracket scanner, so the scanner's output is
+  // collected here and wrapped onto the colorized HTML by wrapBracketMarks.
   private sideLinesFor(side: DiffSide, content: string): Promise<string[]> {
     let promise = this.sideLineHtml.get(side);
     if (promise == null) {
-      promise = monaco.editor
-        .colorize(content, this.language, { tabSize: 4 })
-        .then(splitColorizedLines)
+      promise = Promise.resolve()
+        .then(() => {
+          const previous = this.sideModels.get(side);
+          previous?.dispose();
+          const model = monaco.editor.createModel(content, this.language);
+          this.sideModels.set(side, model);
+          const count = model.getLineCount();
+          const lines = new Array<string>(count);
+          for (let line = 1; line <= count; line += 1)
+            lines[line - 1] = monaco.editor.colorizeModelLine(model, line, 4);
+          this.sideBrackets.set(side, this.bracketMarksFor(model, count));
+          return lines;
+        })
         .catch(() => []);
       this.sideLineHtml.set(side, promise);
     }
     return promise;
+  }
+
+  private bracketMarksFor(
+    model: monaco.editor.ITextModel,
+    count: number,
+  ): Map<number, BracketMark[]> {
+    const marks = new Map<number, BracketMark[]>();
+    const brackets = (model as unknown as BracketModelLike).bracketPairs
+      ?.getBracketsInRange(new monaco.Range(1, 1, count, 1), true)
+      .toArray();
+    if (brackets == null) return marks;
+    for (const bracket of brackets) {
+      const list = marks.get(bracket.range.startLineNumber) ?? [];
+      list.push({
+        start: bracket.range.startColumn - 1,
+        end: bracket.range.endColumn - 1,
+        className: bracket.isInvalid
+          ? "u-bracket-bad"
+          : `u-bracket-${bracket.nestingLevel % BRACKET_COLORS}`,
+      });
+      marks.set(bracket.range.startLineNumber, list);
+    }
+    return marks;
+  }
+
+  private disposeSideModels(): void {
+    for (const model of this.sideModels.values()) model.dispose();
+    this.sideModels.clear();
+    this.sideBrackets.clear();
   }
 
   private colorizePromise(text: string): Promise<string> {

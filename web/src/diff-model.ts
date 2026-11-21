@@ -14,7 +14,9 @@ export interface DiffRow {
   oldLine: number | null;
   newLine: number | null;
   text: string;
-  // Intra-line word diff, precomputed for paired del/add rows.
+  // Intra-line word diff, precomputed for paired del/add rows; rows without
+  // a fragment-level match carry one whole-line span so their word color
+  // still paints (matching the split view).
   spans?: WordSpan[];
   // Set when the source line exceeded MAX_LINE_DISPLAY and was truncated for
   // display; carries the original length so the renderer can say how much
@@ -149,6 +151,14 @@ function spansFor(changes: Change[], side: "del" | "add"): WordSpan[] {
   return spans;
 }
 
+// Rows without fragment-level diffing still paint the word-level add/del
+// color across their full text, the way the split view's char diff does for
+// inserted/removed lines. Empty lines are skipped: they would box nothing.
+function wholeLineSpans(row: DiffRow): void {
+  if (row.spans != null || row.text.length === 0) return;
+  row.spans = [{ text: row.text, kind: row.type }];
+}
+
 function pairBlocks(
   rows: DiffRow[],
   delStart: number,
@@ -160,12 +170,23 @@ function pairBlocks(
   for (let offset = 0; offset < pairs; offset += 1) {
     const del = rows[delStart + offset];
     const add = rows[addStart + offset];
+    // Identical content gets line coloring only — the split view's char
+    // diff finds nothing to highlight here either.
     if (del.text === add.text) continue;
-    if (similarity(del.text, add.text) < SIMILARITY_THRESHOLD) continue;
+    if (similarity(del.text, add.text) < SIMILARITY_THRESHOLD) {
+      // Too dissimilar for a trustworthy fragment diff: highlight whole lines.
+      wholeLineSpans(del);
+      wholeLineSpans(add);
+      continue;
+    }
     const changes = diffWordsWithSpace(del.text, add.text);
     del.spans = spansFor(changes, "del");
     add.spans = spansFor(changes, "add");
   }
+  // Leftover rows in the larger block have no counterpart to pair with
+  // (e.g. every row of a brand-new file) — paint them as whole-line changes.
+  for (let n = delStart + pairs; n < delEnd; n += 1) wholeLineSpans(rows[n]);
+  for (let n = addStart + pairs; n < addEnd; n += 1) wholeLineSpans(rows[n]);
 }
 
 // Word-diff adjacent del/add blocks. jsdiff v6+ emits deletions before
