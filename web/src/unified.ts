@@ -248,9 +248,7 @@ export class UnifiedDiffView {
       return;
     }
     this.generation += 1;
-    this.colorizeQueue.length = 0;
-    this.sideLineHtml.clear();
-    this.disposeSideModels();
+    this.resetColorize();
     this.currentKey = key;
     this.currentFingerprint = file.fingerprint;
     this.closeSearch();
@@ -276,10 +274,7 @@ export class UnifiedDiffView {
 
   clear(): void {
     this.closeSearch();
-    this.generation += 1;
-    this.colorizeQueue.length = 0;
-    this.sideLineHtml.clear();
-    this.disposeSideModels();
+    this.resetColorize();
     this.originalContent = "";
     this.modifiedContent = "";
     this.currentKey = null;
@@ -577,12 +572,22 @@ export class UnifiedDiffView {
     return wrap;
   }
 
+  // Invalidates in-flight colorize work: queued tasks and pending side
+  // promises must not paint into a view that is about to render new content,
+  // and the previous file's live models must be freed.
+  private resetColorize(): void {
+    this.generation += 1;
+    this.colorizeQueue.length = 0;
+    this.sideLineHtml.clear();
+    this.disposeSideModels();
+  }
+
   private renderRowContent(
-    code: HTMLElement,
+    target: HTMLElement,
     row: DiffRow,
     generation: number,
   ): void {
-    code.replaceChildren();
+    target.replaceChildren();
     if (this.searchQuery && row.text.toLowerCase().includes(this.searchQuery)) {
       const text = row.text;
       const lower = text.toLowerCase();
@@ -591,24 +596,24 @@ export class UnifiedDiffView {
         const hit = lower.indexOf(this.searchQuery, cursor);
         if (hit < 0) break;
         if (hit > cursor)
-          code.append(el("span", undefined, text.slice(cursor, hit)));
-        code.append(
+          target.append(el("span", undefined, text.slice(cursor, hit)));
+        target.append(
           el("mark", undefined, text.slice(hit, hit + this.searchQuery.length)),
         );
         cursor = hit + this.searchQuery.length;
       }
       if (cursor < text.length)
-        code.append(el("span", undefined, text.slice(cursor)));
-      this.appendTruncationMarker(code, row);
+        target.append(el("span", undefined, text.slice(cursor)));
+      this.appendTruncationMarker(target, row);
       return;
     }
     if (row.spans != null) {
       const spans = row.spans;
       for (const span of spans)
-        code.append(el("span", `u-w-${span.kind}`, span.text));
+        target.append(el("span", `u-w-${span.kind}`, span.text));
       // Upgrade the plain paint to syntax-colored tokens with the word-diff
       // boxes re-applied; it stays as the fallback when colorize is missing.
-      this.queueColorize(code, row, generation, (html) =>
+      this.queueColorize(target, row, generation, (html) =>
         this.mergeWordDiffBoxes(html, spans),
       );
       return;
@@ -617,8 +622,8 @@ export class UnifiedDiffView {
     // innerHTML — so the code text lives in its own child span.
     const textSpan = el("span", "u-text");
     textSpan.textContent = row.text;
-    code.append(textSpan);
-    this.appendTruncationMarker(code, row);
+    target.append(textSpan);
+    this.appendTruncationMarker(target, row);
     this.queueColorize(textSpan, row, generation);
   }
 
@@ -725,7 +730,7 @@ export class UnifiedDiffView {
   // re-apply word-diff boxes on token spans); when it returns null the row
   // keeps whatever is already painted there.
   private queueColorize(
-    code: HTMLElement,
+    target: HTMLElement,
     row: DiffRow,
     generation: number,
     decorate?: (html: string) => DocumentFragment | null,
@@ -733,26 +738,26 @@ export class UnifiedDiffView {
     if (this.language === "plaintext" || !row.text.trim()) return;
     const apply = (html: string, marks?: readonly BracketMark[]) => {
       if (decorate == null && marks == null) {
-        code.innerHTML = html;
+        target.innerHTML = html;
         return;
       }
       if (decorate == null) {
         const fragment = parseFragment(html);
         if (marks != null) this.wrapBracketMarks(fragment, marks, row.text);
-        code.replaceChildren(fragment);
+        target.replaceChildren(fragment);
         return;
       }
       const merged = decorate(html);
       if (merged == null) return;
       if (marks != null) this.wrapBracketMarks(merged, marks, row.text);
-      code.replaceChildren(merged);
+      target.replaceChildren(merged);
     };
     // Checked at dispatch and again when the colorize promise resolves: the
     // row can be re-rendered in place between the two (same element, same
     // generation), and a then-fresh search highlight must not be overwritten.
     const stale = () =>
       generation !== this.generation ||
-      !code.isConnected ||
+      !target.isConnected ||
       (this.searchQuery !== "" &&
         row.text.toLowerCase().includes(this.searchQuery));
     const source =

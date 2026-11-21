@@ -797,34 +797,25 @@ function renderDecorations(): void {
       comment.line != null &&
       comment.side !== "file",
   );
-  const original = pathComments
-    .filter((comment) => comment.side === "original")
-    .map((comment) => ({
-      range: new monaco.Range(comment.line, 1, comment.line, 1),
-      options: {
-        isWholeLine: true,
-        className: "review-comment-line",
-        glyphMarginClassName: "review-comment-glyph",
-      },
-    }));
-  const modified = pathComments
-    .filter((comment) => comment.side === "modified")
-    .map((comment) => ({
-      range: new monaco.Range(comment.line, 1, comment.line, 1),
-      options: {
-        isWholeLine: true,
-        className: "review-comment-line",
-        glyphMarginClassName: "review-comment-glyph",
-      },
-    }));
+  const decorationsFor = (side: "original" | "modified") =>
+    pathComments
+      .filter((comment) => comment.side === side)
+      .map((comment) => ({
+        range: new monaco.Range(comment.line, 1, comment.line, 1),
+        options: {
+          isWholeLine: true,
+          className: "review-comment-line",
+          glyphMarginClassName: "review-comment-glyph",
+        },
+      }));
   if (originalModel)
     originalDecorations = diffEditor
       .getOriginalEditor()
-      .deltaDecorations(originalDecorations, original);
+      .deltaDecorations(originalDecorations, decorationsFor("original"));
   if (modifiedModel)
     modifiedDecorations = diffEditor
       .getModifiedEditor()
-      .deltaDecorations(modifiedDecorations, modified);
+      .deltaDecorations(modifiedDecorations, decorationsFor("modified"));
 }
 
 function sizeInlineComment(
