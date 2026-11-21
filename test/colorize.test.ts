@@ -4,35 +4,8 @@ import {
   colorizeSourceFor,
   matchesColorizedText,
   splitAtWordBounds,
-  splitColorizedLines,
   wordBounds,
 } from "../web/src/colorize.js";
-
-test("splitColorizedLines splits monaco colorize output into per-line chunks", () => {
-  const html = "<span>a</span><br/><span>b</span><br/>";
-  assert.deepEqual(splitColorizedLines(html), [
-    "<span>a</span>",
-    "<span>b</span>",
-  ]);
-});
-
-test("splitColorizedLines keeps the trailing empty line of newline-terminated input", () => {
-  const html = "<span>a</span><br/><br/>";
-  assert.deepEqual(splitColorizedLines(html), ["<span>a</span>", ""]);
-});
-
-test("splitColorizedLines tolerates output without a trailing separator", () => {
-  const html = "<span>a</span><br/><span>b</span>";
-  assert.deepEqual(splitColorizedLines(html), [
-    "<span>a</span>",
-    "<span>b</span>",
-  ]);
-});
-
-test("splitColorizedLines keeps escaped content intact", () => {
-  const html = "&lt;br/&gt;<br/>x<br/>";
-  assert.deepEqual(splitColorizedLines(html), ["&lt;br/&gt;", "x"]);
-});
 
 test("colorizeSourceFor picks the side that owns the row", () => {
   const eligible = { original: true, modified: true };

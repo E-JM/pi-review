@@ -127,15 +127,3 @@ export function colorizeSourceFor(
     return { side: "original", line: row.oldLine };
   return null;
 }
-
-// monaco.editor.colorize tokenizes with state carried across lines and joins
-// the per-line HTML with "<br/>". Token text is HTML-escaped, so the separator
-// cannot occur inside a chunk, and chunk i is exactly line i+1 of the colorized
-// text. colorize terminates every line — including the last — with "<br/>",
-// making the final split chunk empty; tolerate a renderer without the
-// terminator by only dropping that trailing empty chunk.
-export function splitColorizedLines(html: string): string[] {
-  const chunks = html.split("<br/>");
-  if (chunks[chunks.length - 1] === "") chunks.pop();
-  return chunks;
-}
