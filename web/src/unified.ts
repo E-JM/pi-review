@@ -247,7 +247,6 @@ export class UnifiedDiffView {
       this.refreshCommentRows();
       return;
     }
-    this.generation += 1;
     this.resetColorize();
     this.currentKey = key;
     this.currentFingerprint = file.fingerprint;
