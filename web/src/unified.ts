@@ -890,15 +890,15 @@ export class UnifiedDiffView {
     return fragment;
   }
 
-  // One colorize call per file side, memoized for the mounted content: the
-  // whole side is tokenized with carried state, then split into per-line HTML.
-  // Created lazily inside the idle queue so the synchronous tokenize pass
-  // never delays the initial paint.
-  // Colorizing runs against a live model so Monarch state carries across
-  // lines (multi-line block comments tokenize as comments, not code). Bracket
-  // pair colors are NOT part of that token stream — the editor paints them as
-  // decorations from the model's bracket scanner, so the scanner's output is
-  // collected here and wrapped onto the colorized HTML by wrapBracketMarks.
+  // One colorize call per file side, memoized for the mounted content:
+  // colorizing runs against a live model so Monarch state carries across
+  // lines (multi-line block comments tokenize as comments, not code), and
+  // the per-line HTML is split from that single pass. Created lazily inside
+  // the idle queue so the synchronous tokenize pass never delays the initial
+  // paint. Bracket pair colors are NOT part of that token stream — the editor
+  // paints them as decorations from the model's bracket scanner, so the
+  // scanner's output is collected here and wrapped onto the colorized HTML
+  // by wrapBracketMarks.
   private sideLinesFor(side: DiffSide, content: string): Promise<string[]> {
     let promise = this.sideLineHtml.get(side);
     if (promise == null) {

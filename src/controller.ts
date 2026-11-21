@@ -171,6 +171,9 @@ export class ReviewController {
     }, 100);
   }
 
+  // Serializes window messages and refreshes. then(task, task) runs the next
+  // task whether or not the previous one failed, and the trailing catch
+  // keeps one bad task from wedging the queue.
   private enqueue(task: () => Promise<void>): void {
     this.operation = this.operation.then(task, task).catch(() => {});
   }
